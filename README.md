@@ -481,7 +481,7 @@ python cli.py ask "And how are dependencies resolved?" --session <id>
 python cli.py sessions
 ```
 
-- History is kept as OpenAI message dicts and prepended to each GPT-4o call
+- History is kept as OpenAI message dicts and prepended to each gpt-4.1 call
 - Maximum `SESSION_MAX_TURNS = 10` turns are loaded (oldest dropped first)
 - Sessions are stored in `~/.code-intel/code_intel.db`
 
@@ -635,9 +635,9 @@ Every `ask` invocation is logged to the `query_log` table in `~/.code-intel/code
 | `query_variants` | Number of expansion variants generated |
 | `chunks_retrieved` | Chunks returned after re-ranking |
 | `top_score` | Reranker score of the best chunk |
-| `tokens_used` | Total GPT-4o tokens (prompt + completion) |
+| `tokens_used` | Total gpt-4.1 tokens (prompt + completion) |
 | `latency_ms` | Wall-clock time from retrieve() to answer |
-| `answer_snippet` | First 200 chars of the GPT-4o answer |
+| `answer_snippet` | First 200 chars of the gpt-4.1 answer |
 
 View recent queries:
 
