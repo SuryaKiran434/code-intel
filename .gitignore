@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+
+# Environment
+.env
+
+# Runtime / local data
+*.db
+*.db-shm
+*.db-wal
+*.pid
+*.log
+.webui.pid
+.webui.log
+
+# Milvus local data (if any)
+volumes/
+
+# macOS
+.DS_Store
+
+# pytest
+.pytest_cache/
