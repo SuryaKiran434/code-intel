@@ -1,0 +1,35 @@
+# ── LLM ──────────────────────────────────────────────────────────────────────
+openai                      # GPT-4o API
+tiktoken                    # Token counting for context window management
+
+# ── Embedding ─────────────────────────────────────────────────────────────────
+voyageai                    # Voyage AI API client (voyage-code-3)
+# sentence-transformers     # Uncomment when switching to nomic_local
+# torch                     # Uncomment when switching to nomic_local
+
+# ── Vector Database ───────────────────────────────────────────────────────────
+pymilvus                    # Milvus Python client
+
+# ── Code Chunking ─────────────────────────────────────────────────────────────
+tree-sitter==0.23.2         # Pinned — API changed in 0.22+
+tree-sitter-python==0.23.6  # Python grammar for tree-sitter
+# tree-sitter-java          # Uncomment when adding Java support
+# tree-sitter-scala         # Uncomment when adding Scala support
+
+# ── Git Integration ───────────────────────────────────────────────────────────
+gitpython                   # git diff, pull, commit tracking
+
+# ── Web Server ────────────────────────────────────────────────────────────────
+fastapi                     # REST API for web UI
+uvicorn                     # ASGI server for FastAPI
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+click                       # CLI framework
+rich                        # Terminal output + progress bars
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv               # .env file loading
+numpy                       # Vector operations
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest                      # Test runner

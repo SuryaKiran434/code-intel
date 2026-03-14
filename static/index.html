@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Code Intel</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      max-width: 860px;
+      margin: 48px auto;
+      padding: 0 24px 80px;
+      background: #0d1117;
+      color: #c9d1d9;
+      line-height: 1.6;
+    }
+
+    h1 { color: #58a6ff; font-size: 1.5rem; margin-bottom: 4px; letter-spacing: -0.5px; }
+    h2 { font-size: 0.78rem; color: #8b949e; text-transform: uppercase;
+         letter-spacing: 0.05em; margin-bottom: 8px; }
+
+    label {
+      display: block; font-size: 0.78rem; color: #8b949e;
+      margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+
+    select, textarea, input[type="email"], input[type="password"] {
+      width: 100%; padding: 10px 12px; margin-bottom: 12px;
+      background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+      border-radius: 6px; font-family: inherit; font-size: 0.9rem;
+      transition: border-color 0.15s; resize: vertical;
+    }
+    select:focus, textarea:focus,
+    input[type="email"]:focus, input[type="password"]:focus {
+      outline: none; border-color: #58a6ff;
+    }
+
+    button {
+      width: 100%; padding: 10px; background: #238636; color: #fff;
+      border: none; border-radius: 6px; font-family: inherit;
+      font-size: 0.9rem; cursor: pointer; transition: background 0.15s;
+      margin-bottom: 8px;
+    }
+    button:hover:not(:disabled) { background: #2ea043; }
+    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    button.danger {
+      background: transparent; color: #f85149; border: 1px solid #f85149;
+      width: auto; padding: 4px 12px; font-size: 0.78rem; margin-bottom: 0;
+    }
+    button.danger:hover:not(:disabled) { background: #f8514915; }
+
+    /* ── Header ─────────────────────────────────────── */
+    #app-header {
+      display: flex; align-items: baseline;
+      justify-content: space-between; margin-bottom: 24px;
+    }
+    #user-info { font-size: 0.82rem; color: #8b949e; display: flex; align-items: center; gap: 12px; }
+    #user-name  { color: #58a6ff; }
+
+    /* ── Auth views (login + register share the same container) ── */
+    #auth-view { max-width: 400px; margin: 0 auto; padding-top: 24px; }
+    #auth-view h1 { margin-bottom: 6px; }
+    #auth-subtitle {
+      font-size: 0.82rem; color: #8b949e; margin-bottom: 24px;
+    }
+    #auth-subtitle a {
+      color: #58a6ff; cursor: pointer; text-decoration: underline;
+    }
+    #auth-error { color: #f85149; font-size: 0.84rem; margin-bottom: 12px; display: none; }
+    input[type="text"] {
+      width: 100%; padding: 10px 12px; margin-bottom: 12px;
+      background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+      border-radius: 6px; font-family: inherit; font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus { outline: none; border-color: #58a6ff; }
+    #reg-name-row { display: flex; gap: 10px; }
+    #reg-name-row > div { flex: 1; }
+
+    /* ── App view ────────────────────────────────────── */
+    #app-view { display: none; }
+
+    /* ── Answer / sources ────────────────────────────── */
+    #answer-section { margin-top: 24px; display: none; }
+
+    #answer {
+      background: #161b22; padding: 16px;
+      border-radius: 6px; border-left: 3px solid #58a6ff;
+      font-size: 0.88rem; color: #e6edf3;
+    }
+    #answer.error { border-left-color: #f85149; color: #f85149; white-space: pre-wrap; }
+    #answer p  { margin: 0 0 10px; }
+    #answer p:last-child { margin-bottom: 0; }
+    #answer ul, #answer ol { margin: 0 0 10px; padding-left: 1.5em; }
+    #answer li { margin-bottom: 4px; }
+    #answer strong { color: #79c0ff; }
+    #answer code {
+      background: #0d1117; border: 1px solid #30363d;
+      border-radius: 3px; padding: 1px 5px; font-size: 0.85em;
+    }
+    #answer pre {
+      background: #0d1117; border: 1px solid #30363d;
+      border-radius: 6px; padding: 12px; overflow-x: auto;
+      margin: 10px 0;
+    }
+    #answer pre code { background: none; border: none; padding: 0; font-size: 0.84em; }
+    #answer h3 { font-size: 0.9rem; color: #c9d1d9; margin: 12px 0 4px; text-transform: none; letter-spacing: 0; }
+
+    #sources-section { margin-top: 16px; display: none; }
+
+    .source {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 0.82rem; color: #8b949e; padding: 4px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .source:last-child { border-bottom: none; }
+    .source .label  { color: #56d364; margin-right: 6px; font-size: 0.75rem; }
+    .source .path   { color: #79c0ff; }
+    .source .symbol { color: #d2a8ff; margin: 0 8px; }
+    .source .lines  { color: #484f58; font-size: 0.75rem; }
+    .source .score  { color: #56d364; font-size: 0.75rem; }
+
+    /* ── Spinner ─────────────────────────────────────── */
+    .spinner {
+      display: inline-block; width: 12px; height: 12px;
+      border: 2px solid #30363d; border-top-color: #58a6ff;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+      margin-right: 8px; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #query-meta { font-size: 0.75rem; color: #484f58; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Auth View (login + register) ───────────────────── -->
+  <div id="auth-view">
+    <h1>⚡ Code Intel</h1>
+    <p id="auth-subtitle">
+      No account? <a onclick="showRegister()">Create one</a>
+    </p>
+    <p id="auth-error"></p>
+
+    <!-- Login form -->
+    <div id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" placeholder="you@example.com" autocomplete="email">
+
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password">
+
+      <button id="login-btn" onclick="doLogin()">Sign in</button>
+    </div>
+
+    <!-- Register form (hidden by default) -->
+    <div id="register-form" style="display:none;">
+      <div id="reg-name-row">
+        <div>
+          <label for="reg-first">First name</label>
+          <input id="reg-first" type="text" placeholder="Ada" autocomplete="given-name">
+        </div>
+        <div>
+          <label for="reg-last">Last name</label>
+          <input id="reg-last" type="text" placeholder="Lovelace" autocomplete="family-name">
+        </div>
+      </div>
+
+      <label for="reg-email">Email</label>
+      <input id="reg-email" type="email" placeholder="you@example.com" autocomplete="email">
+
+      <label for="reg-password">Password <span style="color:#484f58;font-size:0.75rem;">(min 8 chars)</span></label>
+      <input id="reg-password" type="password" placeholder="••••••••" autocomplete="new-password">
+
+      <label for="reg-confirm">Confirm password</label>
+      <input id="reg-confirm" type="password" placeholder="••••••••" autocomplete="new-password">
+
+      <button id="register-btn" onclick="doRegister()">Create account</button>
+    </div>
+  </div>
+
+  <!-- ── App View ────────────────────────────────────────── -->
+  <div id="app-view">
+
+    <div id="app-header">
+      <h1>⚡ Code Intel</h1>
+      <div id="user-info">
+        <span id="user-name"></span>
+        <button class="danger" onclick="doLogout()">Sign out</button>
+      </div>
+    </div>
+
+    <label for="repo">Repository</label>
+    <select id="repo">
+      <option value="">All repos</option>
+    </select>
+
+    <label for="question">Question</label>
+    <textarea id="question" rows="3" placeholder="e.g. How does dependency injection work?"></textarea>
+
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button id="ask-btn" onclick="ask()" style="flex:1;margin-bottom:0;">Ask</button>
+      <button id="new-conv-btn" onclick="newConversation()" title="Start a new conversation"
+              style="width:auto;padding:10px 14px;margin-bottom:0;background:#21262d;color:#8b949e;border:1px solid #30363d;">New chat</button>
+    </div>
+
+    <div id="answer-section">
+      <h2>Answer</h2>
+      <div id="answer"></div>
+      <div id="query-meta"></div>
+    </div>
+
+    <div id="sources-section">
+      <h2 style="margin-top:16px;">Sources</h2>
+      <div id="sources"></div>
+    </div>
+
+  </div>
+
+  <script>
+    const TOKEN_KEY = "ci_token";
+    let currentSessionId = null;
+
+    // ── Token helpers ─────────────────────────────────────
+
+    function getToken()    { return localStorage.getItem(TOKEN_KEY); }
+    function setToken(t)   { localStorage.setItem(TOKEN_KEY, t); }
+    function clearToken()  { localStorage.removeItem(TOKEN_KEY); }
+
+    function authHeaders() {
+      return {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + getToken(),
+      };
+    }
+
+    // ── View switching ────────────────────────────────────
+
+    function _setAuthError(msg) {
+      const el = document.getElementById("auth-error");
+      if (msg) { el.textContent = "✗ " + msg; el.style.display = "block"; }
+      else      { el.style.display = "none"; }
+    }
+
+    function showLogin(errorMsg) {
+      document.getElementById("auth-view").style.display    = "block";
+      document.getElementById("app-view").style.display     = "none";
+      document.getElementById("login-form").style.display   = "block";
+      document.getElementById("register-form").style.display= "none";
+      document.getElementById("auth-subtitle").innerHTML    =
+        'No account? <a onclick="showRegister()">Create one</a>';
+      _setAuthError(errorMsg);
+    }
+
+    function showRegister(errorMsg) {
+      document.getElementById("auth-view").style.display    = "block";
+      document.getElementById("app-view").style.display     = "none";
+      document.getElementById("login-form").style.display   = "none";
+      document.getElementById("register-form").style.display= "block";
+      document.getElementById("auth-subtitle").innerHTML    =
+        'Already have an account? <a onclick="showLogin()">Sign in</a>';
+      _setAuthError(errorMsg);
+    }
+
+    function showApp(user) {
+      document.getElementById("auth-view").style.display = "none";
+      document.getElementById("app-view").style.display  = "block";
+      document.getElementById("user-name").textContent   =
+        user.first_name + " " + user.last_name;
+    }
+
+    // ── Auth ──────────────────────────────────────────────
+
+    async function doLogin() {
+      const email    = document.getElementById("login-email").value.trim();
+      const password = document.getElementById("login-password").value;
+      const btn      = document.getElementById("login-btn");
+
+      if (!email || !password) {
+        _setAuthError("Please enter your email and password.");
+        return;
+      }
+
+      btn.disabled  = true;
+      btn.innerHTML = '<span class="spinner"></span>Signing in…';
+
+      try {
+        const res  = await fetch("/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) { _setAuthError(data.detail || "Login failed."); return; }
+        setToken(data.token);
+        await initApp();
+      } catch (e) {
+        _setAuthError("Network error. Is the server running?");
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = "Sign in";
+      }
+    }
+
+    async function doRegister() {
+      const first    = document.getElementById("reg-first").value.trim();
+      const last     = document.getElementById("reg-last").value.trim();
+      const email    = document.getElementById("reg-email").value.trim();
+      const password = document.getElementById("reg-password").value;
+      const confirm  = document.getElementById("reg-confirm").value;
+      const btn      = document.getElementById("register-btn");
+
+      if (!first || !last || !email || !password) {
+        _setAuthError("Please fill in all fields.");
+        return;
+      }
+      if (password.length < 8) {
+        _setAuthError("Password must be at least 8 characters.");
+        return;
+      }
+      if (password !== confirm) {
+        _setAuthError("Passwords do not match.");
+        return;
+      }
+
+      btn.disabled  = true;
+      btn.innerHTML = '<span class="spinner"></span>Creating account…';
+
+      try {
+        const res  = await fetch("/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email, password,
+            first_name: first,
+            last_name:  last,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { _setAuthError(data.detail || "Registration failed."); return; }
+        setToken(data.token);
+        await initApp();
+      } catch (e) {
+        _setAuthError("Network error. Is the server running?");
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = "Create account";
+      }
+    }
+
+    function newConversation() {
+      currentSessionId = null;
+      document.getElementById("question").value                = "";
+      document.getElementById("answer-section").style.display  = "none";
+      document.getElementById("sources-section").style.display = "none";
+      document.getElementById("question").focus();
+    }
+
+    function doLogout() {
+      clearToken();
+      currentSessionId = null;
+      document.getElementById("question").value                = "";
+      document.getElementById("answer-section").style.display  = "none";
+      document.getElementById("sources-section").style.display = "none";
+      document.getElementById("login-password").value          = "";
+      showLogin();
+    }
+
+    // ── Startup ───────────────────────────────────────────
+
+    async function initApp() {
+      const token = getToken();
+      if (!token) { showLogin(); return; }
+
+      try {
+        const res = await fetch("/auth/me", { headers: authHeaders() });
+        if (!res.ok) { clearToken(); showLogin(); return; }
+        const user = await res.json();
+        _setAuthError(null);
+        showApp(user);
+        loadRepos();
+      } catch (e) {
+        showLogin();
+      }
+    }
+
+    async function loadRepos() {
+      try {
+        const res = await fetch("/repos", { headers: authHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const sel  = document.getElementById("repo");
+        while (sel.options.length > 1) sel.remove(1);   // keep "All repos"
+        data.repos.forEach(r => {
+          const opt    = document.createElement("option");
+          opt.value    = r;
+          opt.textContent = r;
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        // silently fail — "All repos" stays as the only option
+      }
+    }
+
+    // ── Ask (streaming) ───────────────────────────────────
+
+    async function ask() {
+      const question = document.getElementById("question").value.trim();
+      if (!question) return;
+
+      const repo_name      = document.getElementById("repo").value || null;
+      const btn            = document.getElementById("ask-btn");
+      const answerEl       = document.getElementById("answer");
+      const answerSection  = document.getElementById("answer-section");
+      const sourcesSection = document.getElementById("sources-section");
+      const sourcesEl      = document.getElementById("sources");
+      const metaEl         = document.getElementById("query-meta");
+
+      btn.disabled                 = true;
+      btn.innerHTML                = '<span class="spinner"></span>Thinking…';
+      answerSection.style.display  = "block";
+      sourcesSection.style.display = "none";
+      answerEl.className           = "";
+      answerEl.textContent         = "Retrieving relevant code…";
+      metaEl.textContent           = "";
+
+      try {
+        const res = await fetch("/query", {
+          method:  "POST",
+          headers: authHeaders(),
+          body:    JSON.stringify({ question, repo_name, session_id: currentSessionId }),
+        });
+
+        if (res.status === 401) {
+          clearToken();
+          showLogin("Your session expired. Please sign in again.");
+          return;
+        }
+
+        if (!res.ok) {
+          // Non-streaming error (e.g. 500 before generator starts)
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || "Request failed");
+        }
+
+        // ── SSE stream reader ─────────────────────────────
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer  = "";
+        let fullText   = "";
+        let firstToken = true;
+
+        outer: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          sseBuffer += decoder.decode(value, { stream: true });
+
+          // SSE events are separated by double newline
+          const parts = sseBuffer.split("\n\n");
+          sseBuffer = parts.pop();          // hold incomplete tail
+
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+
+            let event;
+            try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+            if (event.type === "token") {
+              if (firstToken) {
+                // First token arrives: clear "Retrieving…" placeholder,
+                // switch to pre-wrap so raw text is readable while streaming
+                answerEl.textContent = "";
+                answerEl.style.whiteSpace = "pre-wrap";
+                firstToken = false;
+              }
+              fullText += event.text;
+              answerEl.textContent = fullText;   // safe — no innerHTML injection
+
+            } else if (event.type === "done") {
+              // Stream complete — render full markdown and show sources
+              answerEl.style.whiteSpace = "";
+              if (event.session_id) currentSessionId = event.session_id;
+              answerEl.innerHTML = renderMarkdown(
+                fullText || "No relevant code found for your question."
+              );
+              metaEl.textContent = event.tokens ? event.tokens + " tokens" : "";
+
+              if (event.sources && event.sources.length > 0) {
+                sourcesEl.innerHTML = event.sources.map(s => `
+                  <div class="source">
+                    <span>
+                      <span class="label">[${escapeHtml(s.label)}]</span>
+                      <span class="path">${escapeHtml(s.file)}</span>
+                      <span class="symbol">&#8594; ${escapeHtml(s.symbol || "(unknown)")}</span>
+                      <span class="lines">${escapeHtml(s.lines || "")}</span>
+                    </span>
+                    <span class="score">${s.score}</span>
+                  </div>
+                `).join("");
+                sourcesSection.style.display = "block";
+              }
+              break outer;
+
+            } else if (event.type === "error") {
+              throw new Error(event.message || "Server error");
+            }
+          }
+        }
+
+      } catch (e) {
+        answerEl.style.whiteSpace = "";
+        answerEl.className        = "error";
+        answerEl.innerHTML        = "";
+        answerEl.textContent      = "Error: " + e.message;
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = "Ask";
+      }
+    }
+
+    // ── Utilities ─────────────────────────────────────────
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // Markdown → HTML renderer
+    // Handles: fenced code blocks, headers (#/##/###), ordered + unordered lists,
+    //          bold (**), italic (*), inline code (`), citation labels [C1]
+    function renderMarkdown(text) {
+      const lines     = text.split("\n");
+      const out       = [];
+      let inCode      = false;
+      let codeLines   = [];
+      let inList      = false;
+      let listType    = "";
+
+      const flushList = () => {
+        if (inList) { out.push(`</${listType}>`); inList = false; listType = ""; }
+      };
+
+      // Apply inline formatting to a plain-text string.
+      // escapeHtml runs FIRST so backtick / bold delimiters are never
+      // confused with HTML characters already in the string.
+      const inlineFormat = (s) => {
+        let h = escapeHtml(s);
+        // inline code — protect content before bold/italic so `**x**` inside
+        // backticks stays literal
+        h = h.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+        h = h.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+        h = h.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+        // keep citation labels [C1] [C2] as plain text (no href)
+        return h;
+      };
+
+      for (let i = 0; i < lines.length; i++) {
+        const raw     = lines[i];
+        const trimmed = raw.trim();
+
+        // ── Fenced code block ─────────────────────────────────────────────
+        if (trimmed.startsWith("```")) {
+          if (!inCode) {
+            flushList();
+            inCode     = true;
+            codeLines  = [];
+          } else {
+            // Emit the full block in one push — no leading blank line inside <pre>
+            out.push(`<pre><code>${codeLines.join("\n")}</code></pre>`);
+            inCode    = false;
+            codeLines = [];
+          }
+          continue;
+        }
+        if (inCode) {
+          codeLines.push(escapeHtml(raw));
+          continue;
+        }
+
+        // ── Headers ───────────────────────────────────────────────────────
+        const h3 = trimmed.match(/^###\s+(.*)/);
+        if (h3) { flushList(); out.push(`<h3>${inlineFormat(h3[1])}</h3>`); continue; }
+
+        const h2 = trimmed.match(/^##\s+(.*)/);
+        if (h2) { flushList(); out.push(`<h2 style="font-size:1rem;color:#c9d1d9;margin:14px 0 6px;text-transform:none;letter-spacing:0;">${inlineFormat(h2[1])}</h2>`); continue; }
+
+        const h1 = trimmed.match(/^#\s+(.*)/);
+        if (h1) { flushList(); out.push(`<h2 style="font-size:1.1rem;color:#79c0ff;margin:16px 0 8px;text-transform:none;letter-spacing:0;">${inlineFormat(h1[1])}</h2>`); continue; }
+
+        // ── Ordered list ──────────────────────────────────────────────────
+        const olMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
+        if (olMatch) {
+          if (!inList || listType !== "ol") { flushList(); out.push("<ol>"); inList = true; listType = "ol"; }
+          out.push(`<li>${inlineFormat(olMatch[2])}</li>`);
+          continue;
+        }
+
+        // ── Unordered list ────────────────────────────────────────────────
+        const ulMatch = trimmed.match(/^[-*]\s+(.*)/);
+        if (ulMatch) {
+          if (!inList || listType !== "ul") { flushList(); out.push("<ul>"); inList = true; listType = "ul"; }
+          out.push(`<li>${inlineFormat(ulMatch[1])}</li>`);
+          continue;
+        }
+
+        flushList();
+
+        if (trimmed === "") { out.push(""); continue; }
+        out.push(`<p>${inlineFormat(raw)}</p>`);
+      }
+
+      // Flush any unclosed structures
+      if (inCode) out.push(`<pre><code>${codeLines.join("\n")}</code></pre>`);
+      flushList();
+
+      return out.join("\n").replace(/\n{3,}/g, "\n\n");
+    }
+
+    document.getElementById("question").addEventListener("keydown", e => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ask();
+    });
+    document.getElementById("login-password").addEventListener("keydown", e => {
+      if (e.key === "Enter") doLogin();
+    });
+    document.getElementById("reg-confirm").addEventListener("keydown", e => {
+      if (e.key === "Enter") doRegister();
+    });
+
+    // ── Boot ──────────────────────────────────────────────
+    initApp();
+  </script>
+</body>
+</html>
