@@ -301,11 +301,18 @@ def fetch_chunks_for_file(
 
 # ── Write operations ───────────────────────────────────────────────────────────
 
-def index_chunks(chunks: list[CodeChunk]):
+def index_chunks(
+    chunks: list[CodeChunk],
+    known_existing_ids: set[str] | None = None,
+):
     """
     Embed and insert chunks into the repo's Milvus partition.
     Skips chunks that already exist (identified by content hash).
     This makes indexing idempotent — safe to call multiple times.
+
+    known_existing_ids: when the caller already holds the full set of
+        existing chunk IDs (e.g. sync_repo), pass them here to skip the
+        redundant get_existing_ids() Milvus round-trip.
     """
     if not chunks:
         console.print("  [yellow]No chunks provided to index.[/yellow]")
@@ -314,7 +321,11 @@ def index_chunks(chunks: list[CodeChunk]):
     collection = get_or_create_collection()
     repo_name = chunks[0].repo_name
     pname = ensure_partition(collection, repo_name)
-    existing_ids = get_existing_ids(collection, repo_name)
+
+    if known_existing_ids is not None:
+        existing_ids = known_existing_ids
+    else:
+        existing_ids = get_existing_ids(collection, repo_name)
 
     # Filter to only genuinely new chunks
     new_chunks = [

@@ -10,7 +10,6 @@
   - [Retrieval & Search](#retrieval--search)
   - [Chunking](#chunking)
   - [Sync & State Management](#sync--state-management)
-  - [LLM & Context](#llm--context)
   - [Cross-Repo Intelligence](#cross-repo-intelligence)
   - [Operational](#operational)
     - [Docker Desktop Required](#docker-desktop-required)
@@ -27,17 +26,7 @@
 
 ### Retrieval & Search
 
-#### Method Calls Not Tracked in Call Graph
-`core/graph.py` extracts bare function calls (e.g. `foo()`) but skips method calls on objects (e.g. `obj.bar()`, `self.helper()`). Dependency chains that flow through OOP method dispatch are invisible to graph-augmented retrieval.
-
-**Fix:** Extend `_extract_calls()` to also resolve attribute calls — record `obj.method()` by the method name. Requires basic type inference or a naming-convention heuristic.
-
----
-
-#### Graph Expansion Limited to Direct Callees
-`_expand_with_graph()` only follows one hop of the call graph (direct callees of matched chunks) and caps at 3 graph chunks. Deep dependency chains are not followed.
-
-**Fix:** Add optional depth parameter and increase `max_graph_chunks` for architectural queries. Combine with confidence filtering so low-relevance graph chunks do not crowd out high-relevance direct hits.
+*No open retrieval limitations — see [Resolved](#resolved-limitations).*
 
 ---
 
@@ -58,13 +47,6 @@ Java and Scala support is stubbed in `config.py` and `core/chunker.py` but not a
 
 ### Sync & State Management
 
-#### File-Level Granularity on Sync
-When a single function changes in a 50-function file, all chunks for that file are deleted and re-embedded from scratch. This is wasteful for large files with many stable functions.
-
-**Fix:** Symbol-level diff — compare chunk hashes per symbol rather than per file, and only re-embed symbols whose content hash changed.
-
----
-
 #### Single Branch Tracking
 The sync system always tracks HEAD of the default branch. Feature branches and release branches are invisible.
 
@@ -79,15 +61,6 @@ Keeping repos in sync requires manually running `python cli.py sync <repo>`. Sta
 ```bash
 0 0 * * * cd ~/Desktop/code-intel && source .venv/bin/activate && python cli.py sync --all
 ```
-
----
-
-### LLM & Context
-
-#### Hard Token Cap
-LLM context is capped at `LLM_CONTEXT_TOKEN_LIMIT = 4000` tokens. Complex architectural questions that would benefit from broader context are silently limited.
-
-**Fix:** Make the cap configurable per query via a `--context-limit` CLI flag.
 
 ---
 
@@ -175,6 +148,14 @@ The following limitations were addressed across all implementation phases.
 | **Ephemeral Query Expansion Cache** | Two-level cache: L1 in-process dict + L2 SQLite `query_expansion_cache` (SHA-256 keyed) — survives restarts, shared between CLI and web server |
 | **No Streaming Responses** | `ask_stream()` in `core/llm.py` uses OpenAI `stream=True`; `/query` endpoint streams via SSE (`text/event-stream`); CLI uses blocking `ask()` with immediate display |
 | **No Automated Test Suite** | 85 pytest tests across 5 files covering chunker (20), graph (18), query_expander (15), diff_tracker (16), vector_store (16) — all passing in 1.3s with no external services required |
+| **File-Level Granularity on Sync** | Symbol-level diff via SHA-256 content hashes: `stale_ids = old_chunk_ids − new_chunk_hashes`; `truly_new = new_chunks whose hash is absent from the entire repo`. Unchanged symbols within changed files are never deleted or re-embedded. Single `get_ids_by_file()` batch query replaces N per-file Milvus round-trips. |
+| **Method Calls Not Tracked in Call Graph** | `_extract_calls()` in `core/graph.py` extended to track `obj.method()` attribute calls by method name — same lowercase/length filter as bare-name calls, covers OOP dispatch chains |
+| **Graph Expansion Limited to Direct Callees** | `_expand_with_graph()` rewritten as a BFS frontier loop with a `depth` parameter. Simple queries use depth=1 (3 graph chunks); complex queries use depth=2 (5 graph chunks, follows callees-of-callees) |
+| **Hard Token Cap (4000 tokens)** | Default raised to 8000. `build_context()`, `ask()`, and `ask_stream()` accept a `context_limit` parameter; `--context-limit` CLI flag (range 1000–32000) overrides per query |
+| **Reranker sees all candidates (no pre-filter)** | Score-gap pre-filter drops candidates more than 0.35 cosine score below the best match before the cross-encoder call — reduces reranker latency and cost without losing relevant candidates |
+| **Sequential file parsing on initial index** | `chunk_repository()` now uses `ThreadPoolExecutor(max_workers=min(cpu_count, 8))` with thread-local Parser instances (tree-sitter is not thread-safe); files parsed in parallel |
+| **Redundant Milvus query on sync** | `sync_repo()` passes `known_existing_ids=existing_repo_ids` to `index_chunks()`, skipping the redundant `get_existing_ids()` round-trip that duplicated the already-fetched ID set |
+| **SQLite lock contention during parallel indexing** | All `sqlite3.connect()` calls in `core/graph.py` use `timeout=30` — parallel chunking threads queue writes instead of failing with "database is locked" |
 
 ---
 
@@ -186,8 +167,6 @@ The following limitations were addressed across all implementation phases.
 |---|---|---|
 | High | Cross-repo retrieval (`--repos repo1,repo2`) | Low |
 | Medium | `sync --all` + cron installer | Low |
-| Medium | Symbol-level diff sync | Medium |
-| Medium | Method call tracking in graph (`obj.method()`) | Medium |
 
 ### Future
 
@@ -198,4 +177,3 @@ The following limitations were addressed across all implementation phases.
 | Low | API rate limiting (`slowapi`) | Low |
 | Low | Jupyter notebook indexing | Medium |
 | Low | `--repo-path` CLI override for REPOS_DIR | Low |
-| Low | Multi-hop graph expansion | Medium |

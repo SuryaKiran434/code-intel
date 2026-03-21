@@ -19,7 +19,7 @@ Supported patterns (Python):
 
 Call edges:
     Direct function calls inside function/class bodies — e.g. foo() → "foo".
-    Method calls (obj.method()) are skipped; only bare name calls are tracked.
+    Attribute method calls (obj.method()) are also tracked by method name.
 """
 
 import sqlite3
@@ -155,6 +155,15 @@ def _extract_calls(root) -> list[tuple[str, str]]:
                     pair = (ctx, callee)
                     if pair not in seen:
                         seen.add(pair)
+            elif func and func.type == "attribute":
+                # Track obj.method() calls by method name — covers OOP dispatch
+                attr_node = func.child_by_field_name("attribute")
+                if attr_node and attr_node.type == "identifier":
+                    callee = _text(attr_node)
+                    if callee != ctx and len(callee) > 1 and callee[0].islower():
+                        pair = (ctx, callee)
+                        if pair not in seen:
+                            seen.add(pair)
 
         for child in node.children:
             walk(child, ctx)
@@ -177,7 +186,7 @@ def _persist(
     call_edges: list[tuple[str, str]],
 ) -> None:
     """Replace all graph edges for this file with freshly extracted ones."""
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
         conn.execute(
             "DELETE FROM import_edges WHERE repo_name = ? AND from_file = ?",
             (repo_name, file_path),
@@ -210,7 +219,7 @@ def get_callees(repo_name: str, file_path: str, symbol_name: str) -> list[str]:
     Used to expand direct vector-search hits with their dependencies.
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
             rows = conn.execute(
                 """SELECT to_symbol FROM call_edges
                    WHERE repo_name = ? AND from_file = ? AND from_symbol = ?""",
@@ -226,7 +235,7 @@ def get_callers(repo_name: str, symbol_name: str) -> list[dict]:
     Return (file_path, symbol_name) pairs that call `symbol_name` in this repo.
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
             rows = conn.execute(
                 """SELECT from_file, from_symbol FROM call_edges
                    WHERE repo_name = ? AND to_symbol = ?""",
@@ -242,7 +251,7 @@ def get_imports(repo_name: str, file_path: str) -> list[dict]:
     Return all import edges from a given file.
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
             rows = conn.execute(
                 """SELECT kind, to_module, to_symbol FROM import_edges
                    WHERE repo_name = ? AND from_file = ?""",
@@ -258,7 +267,7 @@ def get_imports(repo_name: str, file_path: str) -> list[dict]:
 def delete_file_graph(file_path: str, repo_name: str) -> None:
     """Remove all graph edges for a deleted file."""
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
             conn.execute(
                 "DELETE FROM import_edges WHERE repo_name = ? AND from_file = ?",
                 (repo_name, file_path),
@@ -274,7 +283,7 @@ def delete_file_graph(file_path: str, repo_name: str) -> None:
 def delete_repo_graph(repo_name: str) -> None:
     """Remove all graph edges for a repo (called on repo removal)."""
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
             conn.execute(
                 "DELETE FROM import_edges WHERE repo_name = ?", (repo_name,)
             )

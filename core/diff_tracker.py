@@ -357,7 +357,9 @@ def sync_repo(repo_name: str):
         console.print(
             f"  [cyan]Inserting {len(all_new_chunks)} new chunks...[/cyan]"
         )
-        index_chunks(all_new_chunks)
+        # Pass existing IDs so index_chunks skips its own get_existing_ids()
+        # call — we already have the full set from get_ids_by_file() above.
+        index_chunks(all_new_chunks, known_existing_ids=existing_repo_ids)
 
     # ── Step 6: Update sync state ──────────────────────────────────────────────
     _update_synced_commit(repo_name, new_commit_sha)

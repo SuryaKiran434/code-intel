@@ -155,7 +155,7 @@ User question
 [Graph expansion] get_callees() → retrieve callee chunks   ← when repo_name provided
       │  tags callee chunks retrieval_source="graph" → labelled [G1], [G2], ...
       ▼
-[build_context()] token budget = 4,000 tokens  ← full → truncated → skip
+[build_context()] token budget = 8,000 tokens  ← full → truncated → skip
       │  [C] chunks first, then [G] chunks
       ▼
 gpt-4.1  system prompt + history + context + question
@@ -179,7 +179,7 @@ Repo on disk (~/Desktop/Repos/<name>)
 Walk all files → filter extensions (.py only currently)
       │
       ▼
-tree-sitter AST parse each file
+tree-sitter AST parse each file (parallel — ThreadPoolExecutor, up to 8 workers)
       │
       ├──────────────────────────────────────────────────────────────►
       │                                                               │
@@ -229,25 +229,31 @@ git pull
 git diff <last_commit>..HEAD
       │
       ▼
-For each changed file:
-  ├── Re-chunk file with tree-sitter
-  ├── Get old chunk IDs for this file from Milvus
-  ├── Delete stale IDs (hash no longer present)
-  └── Insert new chunks (only genuinely new hashes)
-
+Single Milvus query: get_ids_by_file() → all chunk IDs for repo, grouped by path
+      │    (one gRPC call replaces N per-file queries)
+      ▼
 For each deleted file:
-  └── Delete all chunk IDs for that file
+  └── Delete all chunk IDs for that file from the in-memory map
 
 For renames:
   ├── Fetch existing embeddings for old path from Milvus
   ├── Delete old path chunks by ID
   └── Re-insert with updated file_path — zero Voyage API calls
+
+For each changed/added file:
+  ├── Re-chunk file with tree-sitter
+  ├── Compute SHA-256 hash for each new chunk
+  ├── stale_ids  = old_chunk_ids_for_file − new_chunk_hashes   (symbol-level diff)
+  └── truly_new  = new_chunks whose hash doesn't exist anywhere in the repo
+      │
+      ▼
+Batch delete stale IDs → batch insert truly_new chunks
       │
       ▼
 Update .sync_state.json with new HEAD commit
 ```
 
-> Unchanged files are **never re-embedded**. Only modified, added, or deleted files trigger API calls.
+> Unchanged files are **never re-embedded**. Unchanged symbols **within** changed files are also skipped — only symbols whose content hash is new trigger Voyage API calls.
 
 ---
 
@@ -557,7 +563,7 @@ Complex query: COMPLEX_QUERY_CANDIDATE_K = 20        → COMPLEX_QUERY_FINAL_K =
 Complexity triggers: ≥ 15 words, or keywords like `architecture`, `flow`, `pipeline`, `design`, `pattern`, `overview`, `entire`, `end-to-end`, `relationship`, `interact`, `depend`, `structure`.
 
 ### 4. Re-ranking
-After Milvus returns candidates, Voyage `rerank-2.5-lite` re-scores them using a cross-encoder. This replaces cosine similarity scores with deeper relevance scores and reorders results significantly.
+Before calling the cross-encoder, a score-gap pre-filter drops candidates whose cosine similarity is more than `0.35` below the best match — reducing reranker cost and latency without losing relevant results. The remaining candidates are re-scored by Voyage `rerank-2.5-lite`, which replaces cosine similarity with deeper relevance scores and reorders results significantly.
 
 ```
 RERANKER_ENABLED = True
@@ -568,11 +574,13 @@ RERANKER_MODEL   = "rerank-2.5-lite"
 If all final chunks score below `MIN_RETRIEVAL_SCORE = 0.5`, the pipeline returns an empty result and the LLM reports "not enough information found" rather than hallucinating from weak context.
 
 ### 6. Graph-Augmented Expansion
-When `repo_name` is provided, the retriever looks up each matched symbol's callees in the SQLite call graph and fetches those dependency chunks from Milvus. Up to 3 graph-expanded chunks are added, tagged `retrieval_source="graph"`. In `build_context()`, direct chunks are labelled `[C1]`, `[C2]`, … and graph chunks are labelled `[G1]`, `[G2]`, … so the LLM can distinguish semantic matches from structural dependencies.
+When `repo_name` is provided, the retriever expands direct results using a BFS over the call graph. Simple queries follow **1 hop** (direct callees, up to 3 graph chunks); complex queries follow **2 hops** (callees of callees, up to 5 graph chunks). The call graph tracks both bare-name calls (`foo()`) and attribute method calls (`obj.method()`).
+
+Graph-expanded chunks are tagged `retrieval_source="graph"`. In `build_context()`, direct chunks are labelled `[C1]`, `[C2]`, … and graph chunks are labelled `[G1]`, `[G2]`, … so the LLM can distinguish semantic matches from structural dependencies.
 
 ```
 Direct vector hits  → [C1], [C2], [C3], ...
-Graph-expanded deps → [G1], [G2], [G3], ...   (callee functions/classes)
+Graph-expanded deps → [G1], [G2], [G3], ...   (callee functions/classes, 1–2 hops)
 ```
 
 ---
@@ -670,6 +678,7 @@ Search
     --show-chunks                     Print retrieved chunks alongside the answer
     --new-session                     Start a conversation session (prints ID)
     --session <id>                    Continue an existing session
+    --context-limit <n>               Max context tokens sent to gpt-4.1 (default: 8000, max: 32000)
 
 Repos & Status
   python cli.py list                  Table of all indexed repos with chunk stats
@@ -765,7 +774,7 @@ All parameters live in `config.py`.
 | `QUERY_EXPANSION_ENABLED` | `True` | Enable GPT-4o-mini query expansion |
 | `QUERY_EXPANSION_VARIANTS` | `2` | Number of alternative queries |
 | `LLM_MODEL` | `gpt-4.1` | OpenAI model |
-| `LLM_CONTEXT_TOKEN_LIMIT` | `4000` | Max code context tokens sent to gpt-4.1 |
+| `LLM_CONTEXT_TOKEN_LIMIT` | `8000` | Max code context tokens sent to gpt-4.1 (override per query with `--context-limit`) |
 | `LLM_MAX_TOKENS` | `1536` | Max tokens in gpt-4.1 response |
 | `CHUNK_SMALL_MAX_LINES` | `60` | Small/medium chunk threshold |
 | `CHUNK_MEDIUM_MAX_LINES` | `150` | Medium/large chunk threshold |
