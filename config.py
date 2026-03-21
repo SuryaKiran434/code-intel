@@ -36,12 +36,12 @@ VECTOR_DIM      = 1024          # voyage-code-3 default dimension
 #
 EMBEDDING_PROVIDER   = "voyage"
 EMBEDDING_MODEL      = "voyage-code-3"
-EMBEDDING_BATCH_SIZE = 128      # Voyage max batch size (3M TPM / 2000 RPM)
+EMBEDDING_BATCH_SIZE = 128      # Voyage max batch size — voyage-code-3: 3M TPM / 2000 RPM
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 LLM_MODEL              = "gpt-4.1"
 LLM_MAX_TOKENS         = 1536
-LLM_CONTEXT_TOKEN_LIMIT = 4000
+LLM_CONTEXT_TOKEN_LIMIT = 8000
 
 # ── Chunking ──────────────────────────────────────────────────────────────────
 CHUNK_SMALL_MAX_LINES  = 60

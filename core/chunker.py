@@ -18,10 +18,12 @@ Phase 4 additions:
 """
 
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from tree_sitter import Language, Parser          # tree-sitter 0.23.x
-from rich.progress import track
+from rich.progress import Progress, track
 from config import (
     LANGUAGE_REGISTRY,
     CHUNK_SMALL_MAX_LINES,
@@ -50,14 +52,19 @@ class CodeChunk:
         self.line_count = self.end_line - self.start_line + 1
 
 
-# ── Parser cache — build once per language per process ────────────────────────
+# ── Parser cache — one Parser per language per thread ─────────────────────────
+# tree-sitter Parser objects are stateful during a parse and NOT thread-safe.
+# Using threading.local() gives each thread its own cache so parallel
+# chunk_repository workers never share a Parser instance.
 
-_parser_cache: dict[str, Parser] = {}
+_tls = threading.local()
 
 def _get_parser(language_name: str) -> Parser:
-    """Return a cached Parser for the given language."""
-    if language_name in _parser_cache:
-        return _parser_cache[language_name]
+    """Return a thread-local cached Parser for the given language."""
+    if not hasattr(_tls, "cache"):
+        _tls.cache = {}
+    if language_name in _tls.cache:
+        return _tls.cache[language_name]
 
     if language_name == "python":
         import tree_sitter_python as tspython
@@ -76,7 +83,7 @@ def _get_parser(language_name: str) -> Parser:
         raise ValueError(f"No tree-sitter grammar registered for: '{language_name}'")
 
     parser = Parser(lang)
-    _parser_cache[language_name] = parser
+    _tls.cache[language_name] = parser
     return parser
 
 
@@ -355,8 +362,11 @@ def chunk_repository(repo_path: str, repo_name: str) -> list[CodeChunk]:
     """
     Walk an entire repository and chunk every supported source file.
     Skips hidden directories, virtual environments, and build artifacts.
+
+    Files are parsed in parallel using a thread pool — tree-sitter is a C
+    extension that releases the GIL, so multiple files are parsed concurrently.
+    Each thread gets its own Parser instance via thread-local storage.
     """
-    # Collect all file paths first so we can show a progress bar
     all_files: list[str] = []
     for root, dirs, files in os.walk(repo_path):
         dirs[:] = [
@@ -366,8 +376,24 @@ def chunk_repository(repo_path: str, repo_name: str) -> list[CodeChunk]:
         for file_name in files:
             all_files.append(os.path.join(root, file_name))
 
+    if not all_files:
+        return []
+
+    max_workers = min(os.cpu_count() or 4, 8)
     all_chunks: list[CodeChunk] = []
-    for file_path in track(all_files, description="  Chunking files..."):
-        all_chunks.extend(chunk_file(file_path, repo_name))
+
+    with Progress(transient=False) as progress:
+        task = progress.add_task("  Chunking files...", total=len(all_files))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(chunk_file, fp, repo_name): fp
+                for fp in all_files
+            }
+            for future in as_completed(futures):
+                try:
+                    all_chunks.extend(future.result())
+                except Exception:  # noqa: BLE001 — never let one file break the whole index
+                    pass
+                progress.advance(task)
 
     return all_chunks

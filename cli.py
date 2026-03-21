@@ -461,13 +461,19 @@ def remove(repo_name: str, yes: bool):
     "--new-session", is_flag=True, default=False,
     help="Start a new conversation session and print its ID.",
 )
+@click.option(
+    "--context-limit", "context_limit", default=8000, show_default=True,
+    type=click.IntRange(1000, 32000),
+    help="Max tokens of code context sent to the LLM (1000–32000).",
+)
 def ask(
-    question:   str,
-    repo:       str,
-    top_k:      int,
-    show_chunks: bool,
-    session_id: str | None,
-    new_session: bool,
+    question:      str,
+    repo:          str,
+    top_k:         int,
+    show_chunks:   bool,
+    session_id:    str | None,
+    new_session:   bool,
+    context_limit: int,
 ):
     """
     Ask a question about your indexed codebase.
@@ -546,7 +552,7 @@ def ask(
     console.print("\n[bold cyan]Asking gpt-4.1...[/bold cyan]\n")
 
     try:
-        result = llm_ask(question, chunks, history=history)
+        result = llm_ask(question, chunks, history=history, context_limit=context_limit)
     except Exception as e:
         _abort(f"GPT-4o call failed: {e}")
 

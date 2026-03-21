@@ -104,7 +104,8 @@ def retrieve(
     search_params = {"metric_type": "COSINE", "params": {"ef": 64}}
 
     # ── Adaptive Top-K ────────────────────────────────────────────────────────
-    if _is_complex_query(query):
+    is_complex = _is_complex_query(query)
+    if is_complex:
         candidate_limit = COMPLEX_QUERY_CANDIDATE_K if RERANKER_ENABLED else top_k
         final_k         = COMPLEX_QUERY_FINAL_K
     else:
@@ -173,7 +174,14 @@ def retrieve(
     # ── Re-ranking ────────────────────────────────────────────────────────────
     t3 = _time.monotonic()
     if RERANKER_ENABLED and len(chunks) > 1:
-        chunks = _rerank(query, chunks, top_k=final_k)
+        # Pre-filter: drop candidates whose cosine score is far below the best
+        # match before sending to the cross-encoder — reduces reranker cost and
+        # latency without sacrificing recall on the candidates that matter.
+        max_score  = max(c["score"] for c in chunks)
+        pre_filtered = [c for c in chunks if max_score - c["score"] <= 0.35]
+        # Always keep enough candidates for reranking to be meaningful
+        to_rerank = pre_filtered if len(pre_filtered) >= final_k else chunks[:final_k * 2]
+        chunks = _rerank(query, to_rerank, top_k=final_k)
     else:
         chunks = sorted(chunks, key=lambda c: c["score"], reverse=True)[:final_k]
     _log.info("rerank:    %.0fms  (%d→%d chunks)", (_time.monotonic() - t3) * 1000, len(seen_ids), len(chunks))
@@ -183,8 +191,15 @@ def retrieve(
         return []
 
     # ── Graph expansion — pull in callee dependency chunks (cross-file) ───────
+    # Complex queries get depth=2 (follow callees of callees) and a larger
+    # graph chunk budget; simple queries stay at depth=1 to keep latency low.
     if repo_name:
-        chunks = _expand_with_graph(chunks, repo_name, collection)
+        graph_depth = 2 if is_complex else 1
+        graph_cap   = 5 if is_complex else 3
+        chunks = _expand_with_graph(
+            chunks, repo_name, collection,
+            max_graph_chunks=graph_cap, depth=graph_depth,
+        )
 
     return chunks
 
@@ -325,45 +340,55 @@ def _expand_with_graph(
     repo_name: str,
     collection,
     max_graph_chunks: int = 3,
+    depth: int = 1,
 ) -> list[dict]:
     """
-    For each directly-retrieved chunk, look up the symbols it calls via the
-    call graph and fetch those dependency chunks from Milvus.
+    Expand direct retrieval results with dependency chunks from the call graph.
 
+    Uses BFS up to `depth` hops. depth=1 follows direct callees; depth=2 also
+    follows the callees of those callees (useful for architectural queries).
     Graph-expanded chunks are tagged `retrieval_source="graph"` so
-    build_context() can label them [G1], [G2] separately from [C1], [C2].
+    build_context() labels them [G1], [G2] separately from [C1], [C2].
 
-    Limits: at most `max_graph_chunks` graph-expanded results are added,
-    and chunks already in the direct result set are skipped.
+    At most `max_graph_chunks` graph chunks are added in total.
     """
     from core.graph import get_callees  # noqa: PLC0415
 
-    # Track chunk identities already in the direct result set
-    direct_ids: set[str] = {
+    # Track all chunk identities seen so far (direct + graph)
+    seen_ids: set[str] = {
         f"{c['file_path']}::{c['symbol_name']}" for c in chunks
     }
 
     graph_chunks: list[dict] = []
+    # BFS frontier starts with the direct result set
+    frontier = [c for c in chunks if c.get("chunk_type") != "summary"]
 
-    for chunk in chunks:
-        if len(graph_chunks) >= max_graph_chunks:
+    for _ in range(depth):
+        if len(graph_chunks) >= max_graph_chunks or not frontier:
             break
-        if chunk.get("chunk_type") == "summary":
-            continue
 
-        callees = get_callees(repo_name, chunk["file_path"], chunk["symbol_name"])
+        next_frontier: list[dict] = []
 
-        for callee in callees:
+        for chunk in frontier:
             if len(graph_chunks) >= max_graph_chunks:
                 break
 
-            dep_chunks = retrieve_by_symbol(callee, repo_name)
-            for dep in dep_chunks:
-                cid = f"{dep['file_path']}::{dep['symbol_name']}"
-                if cid not in direct_ids:
-                    direct_ids.add(cid)
-                    dep["retrieval_source"] = "graph"
-                    graph_chunks.append(dep)
-                    break   # one chunk per callee is enough
+            callees = get_callees(repo_name, chunk["file_path"], chunk["symbol_name"])
+
+            for callee in callees:
+                if len(graph_chunks) >= max_graph_chunks:
+                    break
+
+                dep_chunks = retrieve_by_symbol(callee, repo_name)
+                for dep in dep_chunks:
+                    cid = f"{dep['file_path']}::{dep['symbol_name']}"
+                    if cid not in seen_ids:
+                        seen_ids.add(cid)
+                        dep["retrieval_source"] = "graph"
+                        graph_chunks.append(dep)
+                        next_frontier.append(dep)
+                        break   # one chunk per callee symbol is enough
+
+        frontier = next_frontier  # next hop expands from this hop's results
 
     return chunks + graph_chunks

@@ -33,10 +33,13 @@ def count_tokens(text: str) -> int:
 
 # ── Context assembly ───────────────────────────────────────────────────────────
 
-def build_context(chunks: list[dict]) -> tuple[str, list[dict]]:
+def build_context(
+    chunks: list[dict],
+    context_limit: int = LLM_CONTEXT_TOKEN_LIMIT,
+) -> tuple[str, list[dict]]:
     """
     Assemble retrieved chunks into a context block that fits within
-    LLM_CONTEXT_TOKEN_LIMIT.
+    context_limit tokens (defaults to LLM_CONTEXT_TOKEN_LIMIT).
 
     Strategy for each chunk:
         1. Try to include the full content
@@ -83,7 +86,7 @@ def build_context(chunks: list[dict]) -> tuple[str, list[dict]]:
 
         full_block  = f"{header}\n\n```{chunk['language']}\n{chunk['content']}\n```"
 
-        remaining = LLM_CONTEXT_TOKEN_LIMIT - total_tokens
+        remaining = context_limit - total_tokens
         block_tokens = count_tokens(full_block)
 
         if block_tokens <= remaining:
@@ -144,9 +147,10 @@ confidently, say so explicitly rather than guessing.
 # ── Main query function ────────────────────────────────────────────────────────
 
 def ask_stream(
-    question: str,
-    chunks:   list[dict],
-    history:  list[dict] | None = None,
+    question:      str,
+    chunks:        list[dict],
+    history:       list[dict] | None = None,
+    context_limit: int = LLM_CONTEXT_TOKEN_LIMIT,
 ):
     """
     Stream the LLM answer token-by-token using the OpenAI streaming API.
@@ -166,7 +170,7 @@ def ask_stream(
         yield {"type": "done",   "sources": [], "tokens": 0, "answer": msg}
         return
 
-    context_text, used_chunks = build_context(chunks)
+    context_text, used_chunks = build_context(chunks, context_limit=context_limit)
 
     user_message = (
         f"Here is the relevant code context from the codebase:\n\n"
@@ -222,9 +226,10 @@ def ask_stream(
 
 
 def ask(
-    question: str,
-    chunks:   list[dict],
-    history:  list[dict] | None = None,
+    question:      str,
+    chunks:        list[dict],
+    history:       list[dict] | None = None,
+    context_limit: int = LLM_CONTEXT_TOKEN_LIMIT,
 ) -> dict:
     """
     Send a question + retrieved code context to GPT-4o and return the answer.
@@ -253,7 +258,7 @@ def ask(
             "sources":        [],
         }
 
-    context_text, used_chunks = build_context(chunks)
+    context_text, used_chunks = build_context(chunks, context_limit=context_limit)
     any_truncated = any(c.get("_truncated") for c in used_chunks)
 
     user_message = (
