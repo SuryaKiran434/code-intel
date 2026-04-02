@@ -59,7 +59,7 @@ Keeping repos in sync requires manually running `python cli.py sync <repo>`. Sta
 
 **Planned fix:** A `sync --all` command plus a cron installer:
 ```bash
-0 0 * * * cd ~/Desktop/code-intel && source .venv/bin/activate && python cli.py sync --all
+0 0 * * * cd ~/IdeaProjects/code-intel && source .venv/bin/activate && python cli.py sync --all
 ```
 
 ---

@@ -260,7 +260,7 @@ Update .sync_state.json with new HEAD commit
 ## Project Structure
 
 ```
-~/Desktop/code-intel/
+~/IdeaProjects/code-intel/
 │
 ├── .env                        # API keys (never commit)
 ├── .sync_state.json            # Auto-managed: last synced commit per repo
@@ -341,7 +341,7 @@ Update .sync_state.json with new HEAD commit
 ### Install
 
 ```bash
-cd ~/Desktop/code-intel
+cd ~/IdeaProjects/code-intel
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -626,7 +626,7 @@ When `sync` is run:
 
 ```bash
 # Add to crontab — syncs nightly at midnight
-0 0 * * * cd ~/Desktop/code-intel && source .venv/bin/activate && python cli.py sync <repo>
+0 0 * * * cd ~/IdeaProjects/code-intel && source .venv/bin/activate && python cli.py sync <repo>
 ```
 
 ---
