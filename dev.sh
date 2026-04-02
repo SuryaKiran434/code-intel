@@ -1,6 +1,6 @@
 #!/bin/bash
 # dev.sh — Code Intel service manager
-# Run from ~/Desktop/code-intel/
+# Run from ~/IdeaProjects/code-intel/
 
 set -e
 

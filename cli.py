@@ -91,7 +91,7 @@ def _check_milvus():
     except Exception as e:
         _abort(
             f"Cannot connect to Milvus at localhost:19530\n"
-            f"  Make sure Docker is running:  cd ~/Desktop/code-intel && docker compose up -d\n"
+            f"  Make sure Docker is running:  cd ~/IdeaProjects/code-intel && docker compose up -d\n"
             f"  Error: {e}"
         )
 
@@ -135,7 +135,7 @@ def cli():
     ⚡ Code Intel — query your codebase with gpt-4.1
     ─────────────────────────────────────────────────
     Repos directory:  ~/Desktop/Repos/
-    Project:          ~/Desktop/code-intel/
+    Project:          ~/IdeaProjects/code-intel/
     """
 
 
