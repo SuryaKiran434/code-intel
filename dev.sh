@@ -102,7 +102,7 @@ start_webui() {
   info "Starting Web UI..."
   source "$PROJECT_DIR/.venv/bin/activate"
   cd "$PROJECT_DIR"
-  nohup uvicorn app:app --port "$WEBUI_PORT" --host 127.0.0.1 \
+  nohup "$PROJECT_DIR/.venv/bin/python" -m uvicorn app:app --port "$WEBUI_PORT" --host 127.0.0.1 \
     > "$PROJECT_DIR/.webui.log" 2>&1 &
   echo $! > "$WEBUI_PID_FILE"
   wait_for_port localhost $WEBUI_PORT "Web UI"
