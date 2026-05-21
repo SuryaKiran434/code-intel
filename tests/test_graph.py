@@ -112,8 +112,10 @@ def test_bare_function_calls():
     assert "baz" in callees
 
 
-def test_method_calls_excluded():
-    """obj.bar() should NOT produce a call edge — only bare identifier calls."""
+def test_method_calls_tracked_by_attribute_name():
+    """obj.bar() and self.helper() produce edges keyed by the method name —
+    covers OOP dispatch chains. (LIMITATIONS: 'Method Calls Not Tracked in
+    Call Graph' was resolved; this test pins the resolved behavior.)"""
     source = textwrap.dedent("""\
         def foo():
             obj.bar()
@@ -121,9 +123,42 @@ def test_method_calls_excluded():
     """)
     tree, lines = _parse(source)
     calls = _extract_calls(tree.root_node)
-    callees = {to for _, to in calls}
-    assert "bar" not in callees
-    assert "helper" not in callees
+    callees = {to for frm, to in calls if frm == "foo"}
+    assert "bar" in callees
+    assert "helper" in callees
+
+
+def test_constructor_calls_tracked():
+    """PascalCase calls (typically constructors) are real dependency edges —
+    they should NOT be filtered like the old `callee[0].islower()` heuristic did."""
+    source = textwrap.dedent("""\
+        def make():
+            obj = MyClass()
+            other = HelperWidget(42)
+    """)
+    tree, lines = _parse(source)
+    calls = _extract_calls(tree.root_node)
+    callees = {to for frm, to in calls if frm == "make"}
+    assert "MyClass" in callees
+    assert "HelperWidget" in callees
+
+
+def test_builtins_excluded():
+    """Builtins like print/len/range create noise in the call graph and are excluded."""
+    source = textwrap.dedent("""\
+        def foo(items):
+            print(len(items))
+            for i in range(10):
+                pass
+            return list(items)
+    """)
+    tree, lines = _parse(source)
+    calls = _extract_calls(tree.root_node)
+    callees = {to for frm, to in calls if frm == "foo"}
+    assert "print" not in callees
+    assert "len" not in callees
+    assert "range" not in callees
+    assert "list" not in callees
 
 
 def test_self_call_excluded():

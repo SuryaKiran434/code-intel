@@ -53,6 +53,12 @@ LLM_MODEL              = "gpt-4.1"
 LLM_MAX_TOKENS         = 1536
 LLM_CONTEXT_TOKEN_LIMIT = 8000
 
+# ── Upstream request timeouts (seconds) ───────────────────────────────────────
+# Bound how long we wait on third-party APIs so a stuck connection doesn't
+# block an SSE stream (or a CLI invocation) indefinitely.
+OPENAI_TIMEOUT_SECONDS = 60.0   # gpt-4.1 streaming can run long; keep generous
+VOYAGE_TIMEOUT_SECONDS = 30.0   # embed + rerank — should complete well under this
+
 # ── Chunking ──────────────────────────────────────────────────────────────────
 CHUNK_SMALL_MAX_LINES  = 60
 CHUNK_MEDIUM_MAX_LINES = 150

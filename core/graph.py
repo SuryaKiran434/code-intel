@@ -27,6 +27,22 @@ import sqlite3
 from config import DB_PATH
 
 
+# ── Per-language extractor registry ───────────────────────────────────────────
+# Add a language by appending an entry: each value is (imports_fn, calls_fn).
+# Mirrors the chunker's LANGUAGE_REGISTRY pattern so adding Java/Scala is
+# purely additive — no edits to extract_and_store_graph required.
+
+_GRAPH_EXTRACTORS: dict[str, tuple] = {
+    # "language_name": (imports_fn(root_node) -> [(kind, module, symbol)],
+    #                   calls_fn(root_node)   -> [(from_symbol, to_symbol)])
+}
+
+
+def register_graph_extractor(language: str, imports_fn, calls_fn) -> None:
+    """Register import/call extractors for a language. Called at module load."""
+    _GRAPH_EXTRACTORS[language] = (imports_fn, calls_fn)
+
+
 # ── Graph extraction ───────────────────────────────────────────────────────────
 
 def extract_and_store_graph(
@@ -44,14 +60,17 @@ def extract_and_store_graph(
     tree is reused — no additional parsing cost.
 
     Non-critical: all exceptions are swallowed so a graph bug never breaks
-    the indexing pipeline.
+    the indexing pipeline. Languages without a registered extractor are
+    silently skipped.
     """
-    if language != "python":
-        return  # Only Python supported currently
+    extractors = _GRAPH_EXTRACTORS.get(language)
+    if not extractors:
+        return
 
+    imports_fn, calls_fn = extractors
     try:
-        import_edges = _extract_imports(tree.root_node)
-        call_edges   = _extract_calls(tree.root_node)
+        import_edges = imports_fn(tree.root_node)
+        call_edges   = calls_fn(tree.root_node)
         _persist(file_path, repo_name, import_edges, call_edges)
     except Exception:   # noqa: BLE001 — graph extraction must never crash indexing
         pass
@@ -131,12 +150,44 @@ def _extract_imports(root) -> list[tuple[str, str, str]]:
     return edges
 
 
+# Python builtins we deliberately don't track as call-graph edges — they're
+# noise and dominate every node in the graph. Keep this list explicit rather
+# than relying on heuristics like "lowercase short name" so PascalCase
+# constructors (MyClass()) and uppercase-prefixed helpers are NOT dropped.
+_BUILTIN_CALLEES = frozenset({
+    "abs", "all", "any", "ascii", "bin", "bool", "bytearray", "bytes",
+    "callable", "chr", "classmethod", "compile", "complex", "delattr",
+    "dict", "dir", "divmod", "enumerate", "eval", "exec", "filter",
+    "float", "format", "frozenset", "getattr", "globals", "hasattr",
+    "hash", "help", "hex", "id", "input", "int", "isinstance", "issubclass",
+    "iter", "len", "list", "locals", "map", "max", "memoryview", "min",
+    "next", "object", "oct", "open", "ord", "pow", "print", "property",
+    "range", "repr", "reversed", "round", "set", "setattr", "slice",
+    "sorted", "staticmethod", "str", "sum", "super", "tuple", "type",
+    "vars", "zip",
+})
+
+
 def _extract_calls(root) -> list[tuple[str, str]]:
     """
     Walk the AST and return (from_symbol, to_symbol) call pairs.
-    Only tracks direct bare-name calls — skips method calls (obj.foo()).
+
+    Tracks two call shapes:
+      foo()          → ("ctx", "foo")
+      obj.method()   → ("ctx", "method")    — covers OOP dispatch
+
+    Filters: skips Python builtins (see _BUILTIN_CALLEES), skips self-calls.
+    PascalCase callees (e.g. MyClass()) ARE tracked — they're typically
+    constructors, which is exactly the dependency edge we want to surface.
     """
     seen: set[tuple[str, str]] = set()
+
+    def _record(ctx: str, callee: str) -> None:
+        if not callee or callee == ctx or callee in _BUILTIN_CALLEES:
+            return
+        pair = (ctx, callee)
+        if pair not in seen:
+            seen.add(pair)
 
     def walk(node, ctx: str):
         if node.type in ("function_definition", "class_definition"):
@@ -148,22 +199,11 @@ def _extract_calls(root) -> list[tuple[str, str]]:
         if node.type == "call":
             func = node.children[0] if node.children else None
             if func and func.type == "identifier":
-                callee = _text(func)
-                # Skip builtins (lowercase short names like print, len, etc.)
-                # and self-calls to avoid noise
-                if callee != ctx and len(callee) > 1 and callee[0].islower():
-                    pair = (ctx, callee)
-                    if pair not in seen:
-                        seen.add(pair)
+                _record(ctx, _text(func))
             elif func and func.type == "attribute":
-                # Track obj.method() calls by method name — covers OOP dispatch
                 attr_node = func.child_by_field_name("attribute")
                 if attr_node and attr_node.type == "identifier":
-                    callee = _text(attr_node)
-                    if callee != ctx and len(callee) > 1 and callee[0].islower():
-                        pair = (ctx, callee)
-                        if pair not in seen:
-                            seen.add(pair)
+                    _record(ctx, _text(attr_node))
 
         for child in node.children:
             walk(child, ctx)
@@ -292,3 +332,10 @@ def delete_repo_graph(repo_name: str) -> None:
             )
     except Exception:   # noqa: BLE001
         pass
+
+
+# ── Built-in language registrations ───────────────────────────────────────────
+# To add Java/Scala: write language-specific extractors using the same return
+# shapes and register them here.
+
+register_graph_extractor("python", _extract_imports, _extract_calls)

@@ -15,7 +15,6 @@ Key design decisions:
 
 import logging
 import time as _time
-from concurrent.futures import ThreadPoolExecutor
 
 import voyageai
 
@@ -26,6 +25,7 @@ from core.embedder import embed_queries
 from config import (
     TOP_K_RESULTS,
     VOYAGE_API_KEY,
+    VOYAGE_TIMEOUT_SECONDS,
     RERANKER_ENABLED,
     RERANKER_MODEL,
     RETRIEVAL_CANDIDATE_K,
@@ -38,7 +38,10 @@ from config import (
     COMPLEX_QUERY_KEYWORDS,
 )
 
-_voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
+_voyage_client = voyageai.Client(
+    api_key=VOYAGE_API_KEY,
+    timeout=VOYAGE_TIMEOUT_SECONDS,
+)
 
 # Module-level collection cache — loaded once per process, reused on every query
 _collection = None
@@ -119,22 +122,21 @@ def retrieve(
 
     t0 = _time.monotonic()
     if _run_expansion:
-        # Start expansion and original-query embedding at the same time.
-        # Expansion (GPT-4o-mini ~1-2s) dominates; overlapping the embed call
-        # (~100ms for 1 query) hides it almost entirely.
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            orig_future = pool.submit(embed_queries, [query])
-            exp_future  = pool.submit(_get_expander(), query)
-            orig_vector = orig_future.result()[0]
-            variants    = exp_future.result()
+        # Expansion (GPT-4o-mini ~1-2s) is the long pole, so we run it
+        # concurrently with… nothing yet. The original query and the variants
+        # share the same Voyage embed call, batched together, once expansion
+        # has produced its variants — one API round-trip instead of two.
+        variants = _get_expander()(query)
         _log.info(
-            "expansion+embed_orig: %.0fms  (%d variants)",
+            "expansion: %.0fms  (%d variants)",
             (_time.monotonic() - t0) * 1000, len(variants),
         )
         t1 = _time.monotonic()
-        variant_vectors = embed_queries(variants) if variants else []
-        _log.info("embed_variants: %.0fms", (_time.monotonic() - t1) * 1000)
-        vectors = [orig_vector] + variant_vectors
+        vectors = embed_queries([query] + list(variants))
+        _log.info(
+            "embed (orig+variants batched): %.0fms",
+            (_time.monotonic() - t1) * 1000,
+        )
     else:
         vectors = embed_queries([query])
         _log.info("embedding (no expansion): %.0fms", (_time.monotonic() - t0) * 1000)

@@ -23,6 +23,7 @@ from config import (
     EMBEDDING_BATCH_SIZE,
     VOYAGE_API_KEY,
     VECTOR_DIM,
+    VOYAGE_TIMEOUT_SECONDS,
 )
 
 
@@ -86,7 +87,10 @@ class VoyageEmbedder(BaseEmbedder):
         except ImportError:
             raise ImportError("Run: pip install voyageai")
 
-        self._client = voyageai.Client(api_key=VOYAGE_API_KEY)
+        self._client = voyageai.Client(
+            api_key=VOYAGE_API_KEY,
+            timeout=VOYAGE_TIMEOUT_SECONDS,
+        )
 
     def _call_api(
         self,

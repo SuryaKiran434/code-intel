@@ -18,10 +18,18 @@ from config import (
     LLM_MODEL,
     LLM_MAX_TOKENS,
     LLM_CONTEXT_TOKEN_LIMIT,
+    OPENAI_TIMEOUT_SECONDS,
 )
 
-client  = OpenAI(api_key=OPENAI_API_KEY)
-encoder = tiktoken.encoding_for_model("gpt-4o")
+client  = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS)
+
+# Encoder follows LLM_MODEL so swapping the model can't silently mis-count
+# tokens. Falls back to o200k_base (gpt-4o/4.1/o-series encoding) when
+# tiktoken hasn't registered a brand-new model yet.
+try:
+    encoder = tiktoken.encoding_for_model(LLM_MODEL)
+except KeyError:
+    encoder = tiktoken.get_encoding("o200k_base")
 
 
 # ── Token utilities ────────────────────────────────────────────────────────────

@@ -89,13 +89,15 @@ def _get_parser(language_name: str) -> Parser:
 
 # ── Docstring extraction ───────────────────────────────────────────────────────
 
-def _extract_docstring(node, lines: list[str]) -> str | None:
+def _extract_docstring(node, lines: list[str]) -> tuple[str, int, int] | None:
     """
-    Return the raw docstring text of a function or class node, or None.
+    Return (docstring_text, start_line, end_line) for a function/class node,
+    or None if there is no docstring.
 
     In Python's tree-sitter AST the docstring is the first statement of the
     body block when that statement is an expression_statement containing a
-    string node.
+    string node. Line numbers are 0-indexed and correspond to the actual
+    span of the string literal in the source file.
     """
     body = None
     for child in node.children:
@@ -112,7 +114,7 @@ def _extract_docstring(node, lines: list[str]) -> str | None:
                 if child.type == "string":
                     start = child.start_point[0]
                     end   = child.end_point[0]
-                    return "\n".join(lines[start : end + 1])
+                    return "\n".join(lines[start : end + 1]), start, end
         # Only check the very first statement
         if stmt.type not in ("comment", "\n"):
             break
@@ -275,19 +277,21 @@ def chunk_file(file_path: str, repo_name: str) -> list[CodeChunk]:
             ))
 
             # ── 4.3: Extract docstring as a sibling chunk ──────────────────
-            docstring = _extract_docstring(node, lines)
-            if docstring and docstring.strip():
-                docstring_chunks.append(CodeChunk(
-                    content=docstring,
-                    file_path=str(file_path),
-                    repo_name=repo_name,
-                    symbol_name=symbol,
-                    start_line=start,
-                    end_line=start,
-                    language=language,
-                    chunk_type="docstring",
-                    parent_symbol=symbol,
-                ))
+            ds = _extract_docstring(node, lines)
+            if ds:
+                ds_text, ds_start, ds_end = ds
+                if ds_text.strip():
+                    docstring_chunks.append(CodeChunk(
+                        content=ds_text,
+                        file_path=str(file_path),
+                        repo_name=repo_name,
+                        symbol_name=symbol,
+                        start_line=ds_start,
+                        end_line=ds_end,
+                        language=language,
+                        chunk_type="docstring",
+                        parent_symbol=symbol,
+                    ))
 
         for child in node.children:
             walk(child)

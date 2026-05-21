@@ -24,9 +24,15 @@ from datetime import datetime, timezone
 
 from openai import OpenAI
 
-from config import OPENAI_API_KEY, QUERY_EXPANSION_MODEL, QUERY_EXPANSION_VARIANTS, DB_PATH
+from config import (
+    OPENAI_API_KEY,
+    OPENAI_TIMEOUT_SECONDS,
+    QUERY_EXPANSION_MODEL,
+    QUERY_EXPANSION_VARIANTS,
+    DB_PATH,
+)
 
-_client = OpenAI(api_key=OPENAI_API_KEY)
+_client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT_SECONDS)
 
 # L1 cache — in-process dict; values are tuples (immutable) to prevent mutation.
 # Failures are NOT cached so transient errors retry next time.
