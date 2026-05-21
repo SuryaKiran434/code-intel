@@ -25,14 +25,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from config import MILVUS_HOST, MILVUS_PORT, COLLECTION_NAME, QUERY_EXPANSION_ENABLED, QUERY_EXPANSION_VARIANTS
+from config import (
+    ALLOW_WEB_REGISTRATION,
+    QUERY_EXPANSION_ENABLED,
+    QUERY_EXPANSION_VARIANTS,
+    SYNC_STATE_PATH,
+)
 from core.db import init_db
-from core.auth import api_login, get_user_by_token, register as auth_register
+from core.auth import (
+    api_login,
+    get_user_by_token,
+    has_any_users,
+    register as auth_register,
+    revoke_token,
+)
 from core.retriever import retrieve
 from core.llm import ask_stream as llm_ask_stream
 from core.session import create_session, load_turns, append_turns_batch, get_session
 from core.telemetry import log_query
-from core.vector_store import get_or_create_collection
 
 # Initialise SQLite schema on startup (no-op if tables already exist)
 init_db()
@@ -103,7 +113,16 @@ def auth_register_route(req: RegisterRequest):
     """
     Create a new account and return a Bearer token (auto-login after register).
     Raises 400 if the email is already registered or password is too short.
+
+    Disabled by default — set ALLOW_WEB_REGISTRATION=1 to enable. The very
+    first account can always be created so the system can be bootstrapped
+    without setting the env var.
     """
+    if not ALLOW_WEB_REGISTRATION and has_any_users():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Web registration is disabled. Register via CLI: python cli.py register",
+        )
     if len(req.password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -119,6 +138,19 @@ def auth_register_route(req: RegisterRequest):
     # Auto-login: create a session token and return it
     token = api_login(req.email, req.password)
     return {"token": token}
+
+
+@app.post("/auth/logout")
+def auth_logout_route(
+    credentials: HTTPAuthorizationCredentials = Security(_bearer),
+):
+    """
+    Revoke the caller's Bearer token. After this call the token cannot be
+    reused — the client must discard it locally and obtain a fresh one via
+    /auth/login. Returns 200 even for unknown tokens (idempotent).
+    """
+    revoke_token(credentials.credentials)
+    return {"ok": True}
 
 
 @app.get("/auth/me")
@@ -235,31 +267,23 @@ def query(req: QueryRequest, user: dict = Depends(_require_user)):
     )
 
 
-_repos_cache: dict = {"data": None, "ts": 0.0}
-_REPOS_CACHE_TTL = 60.0   # seconds
-
-
 @app.get("/repos")
 def list_repos(user: dict = Depends(_require_user)):
-    """Return the names of all indexed repositories (cached for 60 s)."""
-    now = time.monotonic()
-    if _repos_cache["data"] is not None and now - _repos_cache["ts"] < _REPOS_CACHE_TTL:
-        return _repos_cache["data"]
+    """
+    Return the names of all indexed repositories.
+
+    Reads from the sync-state file (same source of truth used by `cli list`)
+    instead of scanning Milvus. This naturally invalidates the moment a new
+    repo is indexed — no TTL cache needed — and avoids a 16k-row Milvus query
+    on every page load.
+    """
+    if not SYNC_STATE_PATH.exists():
+        return {"repos": []}
     try:
-        col = get_or_create_collection()
-        col.load()
-        results = col.query(
-            expr='chunk_type == "full"',
-            output_fields=["repo_name"],
-            limit=16384,
-        )
-        repos = sorted({r["repo_name"] for r in results if r.get("repo_name")})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    result = {"repos": repos}
-    _repos_cache["data"] = result
-    _repos_cache["ts"] = now
-    return result
+        state = json.loads(SYNC_STATE_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise HTTPException(status_code=500, detail=f"Could not read sync state: {e}") from e
+    return {"repos": sorted(state.keys())}
 
 
 # ── Static / root ───────────────────────────────────────────────────────────────

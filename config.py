@@ -9,10 +9,15 @@ OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
 VOYAGE_API_KEY  = os.getenv("VOYAGE_API_KEY")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DESKTOP         = Path.home() / "Desktop"
-REPOS_DIR       = DESKTOP / "Repos"
-PROJECT_DIR     = DESKTOP / "code-intel"
+# PROJECT_DIR anchors to this file's location so the project is self-locating
+# regardless of where it's checked out.
+PROJECT_DIR     = Path(__file__).resolve().parent
 SYNC_STATE_PATH = PROJECT_DIR / ".sync_state.json"
+
+# REPOS_DIR defaults to ~/Desktop/Repos but can be overridden with the
+# CODE_INTEL_REPOS_DIR env var (absolute path) for machines that store
+# cloned repos elsewhere.
+REPOS_DIR       = Path(os.getenv("CODE_INTEL_REPOS_DIR") or (Path.home() / "Desktop" / "Repos"))
 
 # ── Local data directory ───────────────────────────────────────────────────────
 #   Persists across sessions: SQLite DB (users, sessions, query log), auth token.
@@ -21,6 +26,11 @@ DB_PATH                = CODE_INTEL_DIR / "code_intel.db"
 AUTH_FILE              = CODE_INTEL_DIR / ".auth"
 AUTH_TOKEN_EXPIRY_DAYS = 30
 SESSION_MAX_TURNS      = 10    # max prior turns kept in conversation context
+
+# Web registration is disabled by default. Set ALLOW_WEB_REGISTRATION=1 to
+# enable POST /auth/register over HTTP. When no users exist yet, registration
+# is always allowed so the first account can be bootstrapped.
+ALLOW_WEB_REGISTRATION = os.getenv("ALLOW_WEB_REGISTRATION") == "1"
 
 # ── Milvus ────────────────────────────────────────────────────────────────────
 MILVUS_HOST     = "localhost"

@@ -153,9 +153,26 @@ def login(email: str, password: str) -> str:
 
 
 def logout():
-    """Delete the local auth file. Does not invalidate the DB token."""
+    """
+    Sign out: revoke the current token in the DB and remove the local auth file.
+    After this returns, the token cannot be used to authenticate again — even
+    if another process or browser tab still holds a copy of it.
+    """
+    auth = _load_auth()
+    if auth and auth.get("token"):
+        revoke_token(auth["token"])
     if AUTH_FILE.exists():
         AUTH_FILE.unlink()
+
+
+def revoke_token(token: str) -> None:
+    """
+    Delete a token row from auth_tokens so the token can no longer authenticate.
+    Used by logout() and the web POST /auth/logout route. Safe to call with
+    an unknown token (no-op).
+    """
+    with _conn() as conn:
+        conn.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
 
 
 def get_current_user() -> dict | None:
