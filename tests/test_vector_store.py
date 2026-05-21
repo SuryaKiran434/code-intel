@@ -11,9 +11,8 @@ Covers:
   - delete_chunks_by_ids(): no-op on empty list
 """
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from core.vector_store import partition_name, ensure_partition
 

@@ -10,7 +10,6 @@ Covers:
   - Unsupported extensions and empty files
 """
 
-import pytest
 
 from core.chunker import chunk_file, CodeChunk
 

@@ -1,0 +1,15 @@
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+exclude = [".venv", "build", "dist", "__pycache__"]
+
+[tool.ruff.lint]
+# Conservative rule set chosen to catch real bugs without churning style.
+# E,W = pycodestyle errors/warnings · F = pyflakes (unused imports, undefined names,
+# etc.) · B = flake8-bugbear (common Python pitfalls) · UP = pyupgrade (modern syntax).
+select = ["E", "W", "F", "B", "UP"]
+ignore = [
+    "E501",  # line too long — line-length is advisory; many existing lines are comments
+    "E402",  # module-level import not at top — app.py intentionally places logging.basicConfig early
+    "B008",  # FastAPI Depends/Security live in default args by design
+]

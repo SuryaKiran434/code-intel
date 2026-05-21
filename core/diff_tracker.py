@@ -115,8 +115,8 @@ def initial_index(repo_name: str):
 
     try:
         repo = git.Repo(repo_path)
-    except git.InvalidGitRepositoryError:
-        raise ValueError(f"'{repo_path}' is not a valid git repository.")
+    except git.InvalidGitRepositoryError as e:
+        raise ValueError(f"'{repo_path}' is not a valid git repository.") from e
 
     console.print(f"  [cyan]Chunking all files in '{repo_name}'...[/cyan]")
     chunks = chunk_repository(str(repo_path), repo_name)
@@ -178,13 +178,13 @@ def sync_repo(repo_name: str):
 
     try:
         repo = git.Repo(repo_path)
-    except git.InvalidGitRepositoryError:
-        raise ValueError(f"'{repo_path}' is not a valid git repository.")
+    except git.InvalidGitRepositoryError as e:
+        raise ValueError(f"'{repo_path}' is not a valid git repository.") from e
 
     last_commit_sha = get_last_synced_commit(repo_name)
 
     # ── Step 1: Pull latest ────────────────────────────────────────────────────
-    console.print(f"  [cyan]Pulling latest changes from remote...[/cyan]")
+    console.print("  [cyan]Pulling latest changes from remote...[/cyan]")
     try:
         pull_info = repo.remotes.origin.pull()
         for info in pull_info:

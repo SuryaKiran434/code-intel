@@ -11,7 +11,6 @@ Usage:
 import sys
 import os
 import math
-import time
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -119,7 +118,7 @@ def estimate_repo(repo_name: str, vo) -> dict:
         print(f"  ✗ Repo not found: {repo_path}")
         return {}
 
-    print(f"\n  Scanning files...", end="", flush=True)
+    print("\n  Scanning files...", end="", flush=True)
     files = collect_files(repo_path)
     print(f" {len(files)} code files found")
 
@@ -135,7 +134,7 @@ def estimate_repo(repo_name: str, vo) -> dict:
         all_chunks.extend(chunks)
 
     print(f"  Estimated chunks : {format_number(len(all_chunks))}")
-    print(f"  Counting tokens  : ", end="", flush=True)
+    print("  Counting tokens  : ", end="", flush=True)
 
     # Count tokens locally in batches (no API calls, just local tokenizer)
     total_tokens = 0
@@ -146,7 +145,7 @@ def estimate_repo(repo_name: str, vo) -> dict:
         batch_count += 1
         print(".", end="", flush=True)
 
-    print(f" done")
+    print(" done")
 
     # ── Rate limit math ───────────────────────────────────────────────────────
     # With 3 RPM and 10K TPM, the binding constraint is usually TPM.
@@ -190,7 +189,7 @@ def print_report(results: list[dict]):
 
     sep = "─" * 60
     print(f"\n{'═'*60}")
-    print(f"  TOKEN ESTIMATE REPORT  —  voyage-code-3")
+    print("  TOKEN ESTIMATE REPORT  —  voyage-code-3")
     print(f"{'═'*60}")
 
     for r in results:
@@ -204,7 +203,7 @@ def print_report(results: list[dict]):
         print(f"  Avg tokens/chunk   : {r['avg_tokens_chunk']}")
         print(f"  Safe batch size    : {r['safe_batch_size']} chunks/request")
         print(f"  Est. index time    : {format_time(r['index_time_min'] * 60)}")
-        print(f"                       (at 3 RPM / 10K TPM limit)")
+        print("                       (at 3 RPM / 10K TPM limit)")
         print(f"  {sep}")
         if r['paid_tokens'] == 0:
             print(f"  💚 Fits in free tier  ({format_number(r['total_tokens'])} / 200M tokens)")
@@ -215,11 +214,11 @@ def print_report(results: list[dict]):
 
     if len(results) > 1:
         print(f"\n{'═'*60}")
-        print(f"  GRAND TOTAL (all repos combined)")
+        print("  GRAND TOTAL (all repos combined)")
         print(f"  {sep}")
         print(f"  Total tokens       : {format_number(grand_total)}")
         if grand_paid == 0:
-            print(f"  💚 All repos fit in free tier")
+            print("  💚 All repos fit in free tier")
         else:
             print(f"  ⚠️  Paid tokens      : {format_number(grand_paid)}")
             print(f"  Total cost         : ${grand_cost:.4f}")

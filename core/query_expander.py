@@ -20,7 +20,7 @@ Example:
 import hashlib
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from openai import OpenAI
 
@@ -88,7 +88,7 @@ def _save_to_db(query_hash: str, variants: list[str]) -> None:
                 """INSERT OR REPLACE INTO query_expansion_cache
                    (query_hash, variants, created_at) VALUES (?, ?, ?)""",
                 (query_hash, json.dumps(variants),
-                 datetime.now(timezone.utc).isoformat()),
+                 datetime.now(UTC).isoformat()),
             )
     except Exception:
         pass

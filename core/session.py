@@ -16,7 +16,7 @@ Usage pattern:
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from config import DB_PATH, SESSION_MAX_TURNS
 
@@ -42,7 +42,7 @@ def create_session(user_id: str, title: str = "") -> str:
     Returns the new session_id (UUID string).
     """
     session_id = str(uuid.uuid4())
-    now        = datetime.now(timezone.utc).isoformat()
+    now        = datetime.now(UTC).isoformat()
     with _conn() as conn:
         conn.execute(
             """
@@ -83,7 +83,7 @@ def append_turn(session_id: str, role: str, content: str):
     Append a single turn (user question or assistant answer) to the session.
     Also updates last_used timestamp on the session.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     with _conn() as conn:
         conn.execute(
             "INSERT INTO conv_turns (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
@@ -104,7 +104,7 @@ def append_turns_batch(session_id: str, user_content: str, assistant_content: st
         "INSERT INTO conv_turns (session_id, role, content, timestamp)"
         " VALUES (?, ?, ?, ?)"
     )
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     with _conn() as conn:
         conn.execute(_sql, (session_id, "user", user_content, now))
         conn.execute(_sql, (session_id, "assistant", assistant_content, now))

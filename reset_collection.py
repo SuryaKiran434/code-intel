@@ -14,7 +14,7 @@ Usage:
 from dotenv import load_dotenv
 load_dotenv()
 
-from pymilvus import connections, utility, Collection
+from pymilvus import connections, utility
 from config import MILVUS_HOST, MILVUS_PORT, COLLECTION_NAME
 
 def main():
@@ -38,7 +38,7 @@ def main():
 
     # Recreate via vector_store (which has the correct schema)
     from core.vector_store import get_or_create_collection
-    collection = get_or_create_collection()
+    get_or_create_collection()
     print(f"✓ Collection '{COLLECTION_NAME}' recreated with dim=1024 (voyage-code-3).")
     print("\nPartitions are created automatically per repo on first 'add'.")
     print("Re-index all repos: python cli.py add <repo_name> --force")

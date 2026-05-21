@@ -14,7 +14,6 @@ Covers:
 
 import textwrap
 
-import pytest
 import tree_sitter_python as tspython
 from tree_sitter import Language, Parser
 

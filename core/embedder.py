@@ -84,8 +84,8 @@ class VoyageEmbedder(BaseEmbedder):
     def __init__(self):
         try:
             import voyageai
-        except ImportError:
-            raise ImportError("Run: pip install voyageai")
+        except ImportError as e:
+            raise ImportError("Run: pip install voyageai") from e
 
         self._client = voyageai.Client(
             api_key=VOYAGE_API_KEY,
@@ -119,7 +119,7 @@ class VoyageEmbedder(BaseEmbedder):
                     if attempt == 3:
                         raise RuntimeError(
                             f"Voyage API failed after 4 attempts: {e}"
-                        )
+                        ) from e
                     wait = 2 ** attempt   # 1s, 2s, 4s, 8s backoff
                     print(f"  [retry {attempt+1}/4] Waiting {wait}s... ({e})")
                     time.sleep(wait)
@@ -157,9 +157,9 @@ class NomicLocalEmbedder(BaseEmbedder):
 
     def __init__(self):
         try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            raise ImportError("Run: pip install sentence-transformers torch")
+            from sentence_transformers import SentenceTransformer  # noqa: F401
+        except ImportError as e:
+            raise ImportError("Run: pip install sentence-transformers torch") from e
 
         print("Loading nomic-embed-code locally (first run downloads ~14GB)...")
         from sentence_transformers import SentenceTransformer

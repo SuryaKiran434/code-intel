@@ -23,7 +23,7 @@ Usage:
 """
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from config import DB_PATH
 
@@ -65,7 +65,7 @@ def log_query(
         latency_ms       — wall-clock time from retrieve() call to answer
         answer_snippet   — first 200 chars of the GPT-4o answer
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     with _conn() as conn:
         conn.execute(
             """

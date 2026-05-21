@@ -20,8 +20,7 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, UTC
 
 from config import DB_PATH, AUTH_FILE, AUTH_TOKEN_EXPIRY_DAYS
 
@@ -97,7 +96,7 @@ def register(
     salt  = _new_salt()
     pw_hash = _hash_password(password, salt)
     user_id = str(uuid.uuid4())
-    now     = datetime.now(timezone.utc).isoformat()
+    now     = datetime.now(UTC).isoformat()
 
     with _conn() as conn:
         try:
@@ -108,8 +107,8 @@ def register(
                 """,
                 (user_id, email, pw_hash, salt, first_name.strip(), last_name.strip(), now),
             )
-        except sqlite3.IntegrityError:
-            raise ValueError(f"An account with '{email}' already exists.")
+        except sqlite3.IntegrityError as e:
+            raise ValueError(f"An account with '{email}' already exists.") from e
 
     return {
         "id": user_id, "email": email,
@@ -138,7 +137,7 @@ def login(email: str, password: str) -> str:
         raise ValueError("Invalid email or password.")
 
     token      = str(uuid.uuid4())
-    now        = datetime.now(timezone.utc)
+    now        = datetime.now(UTC)
     expires_at = (now + timedelta(days=AUTH_TOKEN_EXPIRY_DAYS)).isoformat()
 
     with _conn() as conn:
@@ -199,7 +198,7 @@ def get_current_user() -> dict | None:
         return None
 
     expires_at = datetime.fromisoformat(row["expires_at"])
-    if datetime.now(timezone.utc) > expires_at:
+    if datetime.now(UTC) > expires_at:
         logout()
         return None
 
@@ -238,7 +237,7 @@ def api_login(email: str, password: str) -> str:
         raise ValueError("Invalid email or password.")
 
     token      = str(uuid.uuid4())
-    now        = datetime.now(timezone.utc)
+    now        = datetime.now(UTC)
     expires_at = (now + timedelta(days=AUTH_TOKEN_EXPIRY_DAYS)).isoformat()
 
     with _conn() as conn:
@@ -271,7 +270,7 @@ def get_user_by_token(token: str) -> dict | None:
         return None
 
     expires_at = datetime.fromisoformat(row["expires_at"])
-    if datetime.now(timezone.utc) > expires_at:
+    if datetime.now(UTC) > expires_at:
         return None
 
     return dict(row)

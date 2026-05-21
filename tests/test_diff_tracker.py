@@ -11,7 +11,6 @@ Covers:
   - _is_supported(): Python files pass, others fail
 """
 
-import json
 import pytest
 
 

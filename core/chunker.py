@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from tree_sitter import Language, Parser          # tree-sitter 0.23.x
-from rich.progress import Progress, track
+from rich.progress import Progress
 from config import (
     LANGUAGE_REGISTRY,
     CHUNK_SMALL_MAX_LINES,
@@ -237,7 +237,7 @@ def chunk_file(file_path: str, repo_name: str) -> list[CodeChunk]:
     node_types = set(lang_config["node_types"])
 
     try:
-        with open(file_path, "r", errors="ignore") as f:
+        with open(file_path, errors="ignore") as f:
             source = f.read()
     except Exception:
         return []
