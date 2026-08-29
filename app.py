@@ -44,6 +44,8 @@ from core.llm import ask_stream as llm_ask_stream
 from core.session import create_session, load_turns, append_turns_batch, get_session
 from core.telemetry import log_query
 
+logger = logging.getLogger("app")
+
 # Initialise SQLite schema on startup (no-op if tables already exist)
 init_db()
 
@@ -51,6 +53,12 @@ app = FastAPI(title="Code Intel", version="1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 _bearer = HTTPBearer(auto_error=True)
+
+# Sent to the browser in place of an upstream exception message. Milvus,
+# Voyage and OpenAI errors name hosts, collections, models and request ids,
+# and an OpenAI auth failure echoes a partial API key, so none of them may
+# be forwarded. The detail is written to the server log instead.
+_GENERIC_STREAM_ERROR = "Something went wrong while answering your question. Please try again."
 
 
 # ── Auth dependency ─────────────────────────────────────────────────────────────
@@ -194,8 +202,11 @@ def query(req: QueryRequest, user: dict = Depends(_require_user)):
 
         try:
             chunks = retrieve(req.question, repo_name=req.repo_name)
-        except Exception as e:
-            yield _sse({"type": "error", "message": str(e)})
+        except Exception:
+            # Still emit an error frame: the client is reading an SSE stream and
+            # would sit there until it timed out if the generator just returned.
+            logger.exception("Retrieval failed (session=%s, repo=%s)", session_id, req.repo_name or "*")
+            yield _sse({"type": "error", "message": _GENERIC_STREAM_ERROR})
             return
 
         if not chunks:
@@ -226,8 +237,11 @@ def query(req: QueryRequest, user: dict = Depends(_require_user)):
                 elif event["type"] == "done":
                     sources     = event["sources"]
                     tokens_used = event["tokens"]
-        except Exception as e:
-            yield _sse({"type": "error", "message": str(e)})
+        except Exception:
+            # Mid-stream failure: tokens may already have reached the browser,
+            # so close the stream with an error frame rather than cutting it off.
+            logger.exception("Answer streaming failed (session=%s)", session_id)
+            yield _sse({"type": "error", "message": _GENERIC_STREAM_ERROR})
             return
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
