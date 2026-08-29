@@ -20,7 +20,7 @@ tree-sitter-python==0.23.6  # Python grammar for tree-sitter
 # tree-sitter-scala         # Uncomment when adding Scala support
 
 # ── Git Integration ───────────────────────────────────────────────────────────
-gitpython==3.1.46           # git diff, pull, commit tracking
+gitpython==3.1.58           # git diff, pull, commit tracking
 
 # ── Web Server ────────────────────────────────────────────────────────────────
 fastapi==0.135.1            # REST API for web UI
