@@ -32,7 +32,7 @@ click==8.3.1                # CLI framework
 rich==14.3.3                # Terminal output + progress bars
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
-python-dotenv==1.2.2        # .env file loading
+python-dotenv==1.2.3        # .env file loading
 numpy==2.4.3                # Transitive dependency (required by voyageai and pymilvus)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
