@@ -36,4 +36,4 @@ python-dotenv==1.2.2        # .env file loading
 numpy==2.4.3                # Transitive dependency (required by voyageai and pymilvus)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
-pytest==9.0.2               # Test runner
+pytest==9.1.1               # Test runner
