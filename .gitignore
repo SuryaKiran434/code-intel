@@ -25,3 +25,8 @@ volumes/
 # pytest
 .pytest_cache/
 .sync_state.json
+
+# Coverage
+coverage.xml
+.coverage
+htmlcov/
