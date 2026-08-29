@@ -21,6 +21,10 @@ jobs:
         python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          # SonarCloud needs the full history to attribute code to authors and
+          # to work out what counts as "new code"; a shallow clone breaks both.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7
@@ -71,6 +75,17 @@ jobs:
           name: coverage
           path: coverage.xml
           if-no-files-found: error
+
+      # Runs after pytest so coverage.xml already exists. Configuration lives in
+      # sonar-project.properties at the repo root.
+      #
+      # Analysis is advisory, not a gate: continue-on-error keeps a SonarCloud
+      # outage or a scanner hiccup from failing the required check.
+      - name: SonarCloud analysis
+        continue-on-error: true
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   lint:
     runs-on: ubuntu-latest
