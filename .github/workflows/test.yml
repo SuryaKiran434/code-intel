@@ -28,12 +28,21 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      # `--only-binary :all:` makes pip refuse source distributions, so no
+      # package's setup.py can execute during install. Checked against the
+      # resolved tree for cp313/manylinux: all 81 distributions have wheels,
+      # so this constrains what pip may do without changing what it installs.
+      #
+      # `python -m pip install --upgrade pip` used to lead this block. It was a
+      # no-op -- setup-python already provides the current pip -- and pinning it
+      # to satisfy the version-lock rule would turn it into a downgrade the day
+      # the runner image ships something newer, so the line is gone instead.
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # Test-only; requirements.txt stays the pinned runtime set.
-          pip install pytest-cov
+          pip install -r requirements.txt --only-binary :all:
+          # Test-only; requirements.txt stays the pinned runtime set. Pinned to
+          # the version CI already resolved, so behaviour is unchanged.
+          pip install pytest-cov==7.1.0 --only-binary :all:
 
       - name: Run pytest
         env:
@@ -74,8 +83,11 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      # Pinned to the version CI already resolved; see the install step above
+      # for why `--only-binary :all:` is here.
       - name: Install ruff
-        run: pip install ruff
+        # Quoted: a plain YAML scalar may not end in a colon.
+        run: "pip install ruff==0.16.5 --only-binary :all:"
 
       - name: Run ruff
         run: ruff check .
