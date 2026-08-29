@@ -60,6 +60,12 @@ _bearer = HTTPBearer(auto_error=True)
 # be forwarded. The detail is written to the server log instead.
 _GENERIC_STREAM_ERROR = "Something went wrong while answering your question. Please try again."
 
+# Same reasoning for GET /repos: a failure to read the sync-state file raises
+# OSError or json.JSONDecodeError, whose messages carry the file's absolute
+# path (and so the server's directory layout) or the parse offset and the text
+# around it. The exception is logged; the client gets this.
+_GENERIC_REPOS_ERROR = "Could not read the repository list. Please try again."
+
 
 # ── Auth dependency ─────────────────────────────────────────────────────────────
 
@@ -296,7 +302,11 @@ def list_repos(user: dict = Depends(_require_user)):
     try:
         state = json.loads(SYNC_STATE_PATH.read_text())
     except (OSError, json.JSONDecodeError) as e:
-        raise HTTPException(status_code=500, detail=f"Could not read sync state: {e}") from e
+        # Same class of leak as the two /query handlers: OSError carries the
+        # absolute sync-state path and errno, JSONDecodeError carries the parse
+        # position and the offending line. Neither goes to the client.
+        logger.exception("Could not read sync state (user=%s)", user["id"])
+        raise HTTPException(status_code=500, detail=_GENERIC_REPOS_ERROR) from e
     return {"repos": sorted(state.keys())}
 
 
