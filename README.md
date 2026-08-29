@@ -10,7 +10,7 @@
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Tech Stack](#tech-stack)
-- [Setup](#setup)
+- [Run It Locally](#run-it-locally)
 - [Usage](#usage)
 - [Authentication](#authentication)
 - [Conversation Sessions](#conversation-sessions)
@@ -47,12 +47,12 @@ It works entirely from your local machine. Your code never leaves your environme
 │                          User Interface                             │
 │                                                                     │
 │         CLI (cli.py)                    Web UI (app.py)             │
-│    python cli.py ask "..."          http://localhost:PORT           │
+│    python cli.py ask "..."          http://localhost:7860           │
 └───────────────┬─────────────────────────────┬───────────────────────┘
                 │                             │
                 ▼                             ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          Auth & Session Layer                       │
+│              Auth & Session Layer (schema: core/db.py)              │
 │                                                                     │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
 │  │   auth.py    │    │  session.py  │    │    telemetry.py      │  │
@@ -69,7 +69,7 @@ It works entirely from your local machine. Your code never leaves your environme
 │                                                                     │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
 │  │ diff_tracker │    │   chunker    │    │      retriever       │  │
-│  │              │───▶│              │    │                      │  │
+│  │              │───▶│              │    │ batched graph BFS    │  │
 │  │ git pull     │    │ tree-sitter  │    │ query_expander       │  │
 │  │ diff commits │    │ 5 chunk types│    │ multi-vector search  │  │
 │  │ track state  │    │ overlap split│    │ rerank-2.5-lite      │  │
@@ -78,7 +78,7 @@ It works entirely from your local machine. Your code never leaves your environme
 │                             ▼                        │              │
 │                    ┌──────────────┐                  │              │
 │                    │   embedder   │                  │              │
-│                    │              │                  │              │
+│                    │ 4-worker pool│                  │              │
 │                    │ voyage-code-3│                  │              │
 │                    │ embed_code() │                  │              │
 │                    │ embed_query()│                  │              │
@@ -98,7 +98,7 @@ It works entirely from your local machine. Your code never leaves your environme
 │              │                      │                               │
 │              │ import/call edges    │                               │
 │              │ SQLite-backed        │                               │
-│              │ callee expansion     │                               │
+│              │ get_callees_batch()  │                               │
 │              └──────────────────────┘                               │
 └─────────────────────────│────────────────────────────│─────────────┘
                           │                            │
@@ -112,7 +112,7 @@ It works entirely from your local machine. Your code never leaves your environme
               └───────────────────────┘   └───────────────────────┘
 
               ┌───────────────────────┐   ┌───────────────────────┐
-              │   Voyage AI API       │   │   SQLite (~/.code-intel)│
+              │   Voyage AI API       │   │  SQLite ~/.code-intel │
               │                       │   │                       │
               │  voyage-code-3        │   │  users + tokens       │
               │  rerank-2.5-lite      │   │  sessions + turns     │
@@ -137,14 +137,15 @@ User question
 [Session load] load_turns(session_id)   ← prior conversation history (if --session)
       │
       ▼
-[Query expansion + original embed] parallel via ThreadPoolExecutor  ← QUERY_EXPANSION_ENABLED
-      │  GPT-4o-mini → N variants  |  embed_queries([original]) — run at same time
+[Query expansion] expand_query(question)      ← QUERY_EXPANSION_ENABLED, skipped for ≤ 4 words
+      │  GPT-4o-mini → N variants (L1 dict cache → L2 SQLite cache → API)
       ▼
-[Embed variants] embed_queries(variants)      ← voyage-code-3, input_type="query", batched
+[Embed] embed_queries([original] + variants)  ← voyage-code-3, input_type="query", one API call
       │
       ▼
-[Milvus search] single call, all vectors      ← COSINE, adaptive top-K, Eventually consistent
-      │  collection.search(data=[v1,v2,...vN]) — one RPC, merged + dedup by content hash
+[Milvus search] single call, all vectors      ← COSINE (ef=64), adaptive top-K, Eventually
+      │  collection.search(data=[v1,v2,...vN]) — one RPC, scoped to the repo's partition
+      │  results merged + deduped by file_path::symbol_name, highest score wins
       ▼
 [Re-rank] Voyage rerank-2.5-lite             ← RERANKER_ENABLED
       │
@@ -152,7 +153,8 @@ User question
 [Confidence threshold] score ≥ MIN_RETRIEVAL_SCORE
       │
       ▼
-[Graph expansion] get_callees() → retrieve callee chunks   ← when repo_name provided
+[Graph expansion] BFS over the call graph, batched per hop  ← when repo_name provided
+      │  get_callees_batch() = 1 SQLite query per hop, then 1 Milvus query per hop
       │  tags callee chunks retrieval_source="graph" → labelled [G1], [G2], ...
       ▼
 [build_context()] token budget = 8,000 tokens  ← full → truncated → skip
@@ -173,7 +175,7 @@ Answer with [C1][C2] (direct) and [G1][G2] (dependency) inline citations + sourc
 ### Indexing Flow
 
 ```
-Repo on disk (~/Desktop/Repos/<name>)
+Repo on disk (REPOS_DIR/<name> — ~/Desktop/Repos by default)
       │
       ▼
 Walk all files → filter extensions (.py only currently)
@@ -207,6 +209,7 @@ SHA-256 content hash (16 chars) → Milvus primary key (deduplication)
       │
       ▼
 Batch embed via voyage-code-3 (embed_code, batch size = 128)
+      │  batches dispatched over a 4-worker pool; order preserved
       │
       ▼
 Insert into Milvus collection "code_intel"
@@ -263,6 +266,7 @@ Update .sync_state.json with new HEAD commit
 ~/IdeaProjects/code-intel/
 │
 ├── .env                        # API keys (never commit)
+├── .env.example                # Template for .env — copy and fill in
 ├── .sync_state.json            # Auto-managed: last synced commit per repo
 │
 ├── config.py                   # All tuneable parameters in one place
@@ -275,6 +279,18 @@ Update .sync_state.json with new HEAD commit
 ├── reset_collection.py         # Drop and recreate Milvus collection
 ├── estimate_tokens.py          # Dry-run token estimator (zero API cost)
 ├── pytest.ini                  # Test runner configuration
+├── pyproject.toml              # Ruff lint configuration
+├── LIMITATIONS.md              # Known gaps and trade-offs
+│
+├── static/
+│   └── index.html              # Web UI single-page frontend
+│
+├── .github/
+│   ├── CODEOWNERS
+│   ├── dependabot.yml          # Weekly pip + github-actions updates
+│   └── workflows/
+│       ├── test.yml            # CI: pytest (3.13) + ruff lint
+│       └── slack-notify.yml
 │
 ├── core/
 │   ├── db.py               # SQLite schema (users, sessions, query log, graph, cache)
@@ -296,7 +312,9 @@ Update .sync_state.json with new HEAD commit
     ├── test_graph.py       # Import/call graph extraction, SQLite round-trips
     ├── test_query_expander.py  # L1/L2 cache hit/miss, API failure handling
     ├── test_diff_tracker.py    # Sync state persistence, file-type filtering
-    └── test_vector_store.py    # partition_name, ensure_partition, reinsert
+    ├── test_vector_store.py    # partition_name, ensure_partition, reinsert
+    ├── test_retriever.py       # Filters, adaptive top-K, rerank, graph expansion
+    └── test_embedder.py        # Batching, worker pool, order preservation
 ```
 
 **Local data directory:** `~/.code-intel/`
@@ -328,20 +346,31 @@ Update .sync_state.json with new HEAD commit
 
 ---
 
-## Setup
+## Run It Locally
 
-### Prerequisites
+Everything below works from a clean machine. Steps 1–7 are the full path from
+nothing installed to an answered question.
 
-- Docker Desktop running
-- Python 3.13 via pyenv
-- OpenAI API key
-- Voyage AI API key
-- Repos pre-cloned under `~/Desktop/Repos/`
+### 1. Prerequisites
 
-### Install
+| Requirement | Notes |
+|---|---|
+| **Python 3.13** | `pyproject.toml` targets `py313` and CI runs `pytest (3.13)`. Earlier 3.x may work but is untested. |
+| **Docker** | Docker Desktop on macOS, or any Docker Engine with `docker compose`. Milvus runs in containers. |
+| **Git** | Used by `sync` (`git pull`, `git diff`) via GitPython. |
+| **OpenAI API key** | Answers (`gpt-4.1`) and query expansion (`gpt-4o-mini`). |
+| **Voyage AI API key** | Embeddings (`voyage-code-3`) and re-ranking (`rerank-2.5-lite`). |
+| **~2 GB free disk** | Milvus + etcd + MinIO container volumes. |
+
+`dev.sh` is macOS-oriented — it launches and quits Docker Desktop via `open -a Docker`
+and `osascript`. On Linux, start Docker yourself and use the raw `docker compose`
+and `uvicorn` commands shown below.
+
+### 2. Clone and create a virtualenv
 
 ```bash
-cd ~/IdeaProjects/code-intel
+git clone https://github.com/SuryaKiran434/code-intel.git
+cd code-intel
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -350,19 +379,148 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Environment
+All dependencies are pinned in `requirements.txt`. Bump them intentionally
+rather than with `pip install -U`.
+
+### 3. Configure environment variables
+
+Copy the template and fill in your two keys:
+
+```bash
+cp .env.example .env
+```
 
 ```bash
 # .env
-OPENAI_API_KEY=sk-...
-VOYAGE_API_KEY=pa-...
+OPENAI_API_KEY=sk-...          # required
+VOYAGE_API_KEY=pa-...          # required
+
+# Optional
+CODE_INTEL_REPOS_DIR=/absolute/path/to/your/repos   # default: ~/Desktop/Repos
+ALLOW_WEB_REGISTRATION=1                            # default: off (see Web UI)
 ```
 
-### Start Services
+`config.py` loads `.env` through `python-dotenv`. `.env` is gitignored — never commit it.
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `OPENAI_API_KEY` | Yes | — | `gpt-4.1` answers, `gpt-4o-mini` query expansion |
+| `VOYAGE_API_KEY` | Yes | — | `voyage-code-3` embeddings, `rerank-2.5-lite` re-ranking |
+| `CODE_INTEL_REPOS_DIR` | No | `~/Desktop/Repos` | Absolute path to the directory holding the repos you want indexed |
+| `ALLOW_WEB_REGISTRATION` | No | unset (off) | Set to `1` to allow `POST /auth/register` over HTTP |
+
+### 4. Start Milvus
 
 ```bash
-./dev.sh start        # starts Milvus + Attu GUI
+docker compose up -d          # etcd + MinIO + Milvus standalone
+docker compose ps             # all three should be running
 ```
+
+Milvus needs a few seconds before it accepts connections on `19530`. The
+collection and its HNSW/COSINE index are created automatically on first use —
+there is no separate schema step.
+
+Or let the service manager do everything (macOS):
+
+```bash
+./dev.sh start                # Docker Desktop + venv + Milvus + Attu + Web UI
+```
+
+### 5. Create an account and index your first repo
+
+`add` indexes a repo that is **already cloned** under `REPOS_DIR` — it does not
+clone for you. Point `CODE_INTEL_REPOS_DIR` at wherever your repos live, or use
+the default `~/Desktop/Repos`:
+
+```bash
+mkdir -p ~/Desktop/Repos
+git clone https://github.com/pallets/click.git ~/Desktop/Repos/click
+
+python cli.py register        # email + password + name, stored in ~/.code-intel/code_intel.db
+python cli.py login           # token written to ~/.code-intel/.auth
+
+python cli.py add click       # chunk → embed → insert into Milvus
+```
+
+Only `.py` files are indexed today (see [Chunking Strategy](#chunking-strategy)).
+Want a cost estimate before spending Voyage tokens?
+
+```bash
+python estimate_tokens.py click     # dry run, zero API calls
+```
+
+### 6. Ask a question
+
+```bash
+python cli.py ask "How are commands registered?" --repo click
+python cli.py status                 # Milvus health, auth, embedding config, indexed repos
+```
+
+### 7. Start the web UI
+
+```bash
+python -m uvicorn app:app --host 127.0.0.1 --port 7860
+```
+
+Open `http://localhost:7860` and sign in with the account you created in step 5.
+Registration through the browser is disabled unless `ALLOW_WEB_REGISTRATION=1`
+(the first-ever account is always allowed, so a fresh install can bootstrap itself).
+
+### Ports
+
+| Port | Service | Started by |
+|---|---|---|
+| `19530` | Milvus gRPC | `docker compose` |
+| `9091` | Milvus metrics / health | `docker compose` |
+| `7860` | Web UI (uvicorn) | `uvicorn` / `./dev.sh start` |
+| `8000` | Attu (Milvus GUI) | `./dev.sh start` — `docker run zilliz/attu` |
+
+etcd and MinIO run inside the compose network and publish no host ports.
+
+### Running the tests
+
+The suite is fully offline — every external service (Voyage, OpenAI, Milvus,
+SQLite paths) is stubbed. The API-key variables only need to be *present* so the
+module-level clients can be constructed at import time; they are never used to
+make a call.
+
+```bash
+source .venv/bin/activate
+OPENAI_API_KEY=test-openai-key VOYAGE_API_KEY=test-voyage-key pytest -v
+```
+
+**112 tests, all passing.**
+
+| File | Tests | Covers |
+|---|---|---|
+| `tests/test_graph.py` | 24 | Import/call extraction, `get_callees_batch`, SQLite round-trips |
+| `tests/test_chunker.py` | 20 | All 5 chunk types, 3-tier strategy, split overlap |
+| `tests/test_diff_tracker.py` | 16 | Sync state persistence, file-type filtering |
+| `tests/test_vector_store.py` | 16 | `partition_name`, `ensure_partition`, reinsert |
+| `tests/test_retriever.py` | 15 | Filters, adaptive top-K, rerank fallback, graph expansion |
+| `tests/test_query_expander.py` | 14 | L1/L2 cache hit/miss, API failure handling |
+| `tests/test_embedder.py` | 7 | Batching, worker pool, order preservation |
+
+Lint with the same rule set CI uses:
+
+```bash
+pip install ruff && ruff check .
+```
+
+CI (`.github/workflows/test.yml`) runs both as required checks: **`pytest (3.13)`** and **`lint`**.
+
+### Stopping and cleaning up
+
+```bash
+docker compose down           # stop Milvus (volumes are kept)
+docker compose down -v        # also delete the indexed vectors
+
+./dev.sh stop                 # macOS: stop Web UI + Attu + Milvus, quit Docker Desktop
+python reset_collection.py    # drop and recreate the Milvus collection only
+```
+
+Local state outside Docker lives in `~/.code-intel/` (SQLite DB + auth token)
+and `.sync_state.json` in the project root.
 
 ---
 
@@ -512,9 +670,9 @@ Code Intel uses tree-sitter to parse code at the AST level, extracting semantic 
 | `docstring` | First string literal of any function/class | Embeds closer to natural language queries |
 | `module_level` | All top-level lines not inside any function/class | Constants, type aliases, imports, module expressions |
 
-**Summary chunks** are excluded from retrieval by default but used as LLM context fallback for large symbols.
+**Summary chunks** are excluded from retrieval by default (`chunk_type != "summary"` is added to every search expression). They are stored so a large symbol still has a compact representation available, and can be pulled in explicitly via `include_summaries=True`. `build_context()` does not swap them in automatically — an oversized chunk is truncated to its first 30 lines instead.
 
-**Split overlap:** Each `split_part` shares the last 10 lines of the previous part, preventing loss of variable bindings and setup context across splits.
+**Split overlap:** Parts are `CHUNK_MEDIUM_MAX_LINES` (150) lines wide, cut at the nearest blank line within 20 lines of the boundary. Each `split_part` shares the last 10 lines of the previous part, preventing loss of variable bindings and setup context across splits.
 
 ### Adding more languages
 
@@ -536,8 +694,12 @@ Also install the corresponding tree-sitter grammar (`tree-sitter-java`, `tree-si
 
 The retrieval pipeline runs several stages between the user's question and the LLM:
 
-### 1. Query Expansion (Parallel)
-GPT-4o-mini generates 2 alternative phrasings of the question. Query expansion and the original query embedding run **in parallel** via `ThreadPoolExecutor`, so the GPT-4o-mini call (~1-2s) overlaps with the Voyage embed call (~100ms). All variant embeddings are then batched into a single Voyage API call. This covers vocabulary mismatch between how developers ask questions and how code is written.
+### 1. Query Expansion
+GPT-4o-mini generates 2 alternative phrasings of the question, covering the vocabulary mismatch between how developers ask questions and how code is written. Results are cached twice — an in-process dict (L1) and a SQLite table (L2, shared between the CLI and the web UI) — so a repeated question skips the API call entirely. Failures are not cached and degrade silently to single-query retrieval.
+
+Expansion is **skipped for queries of 4 words or fewer**: short queries are already specific, and variants add noise rather than signal.
+
+The original question and every variant are then embedded in a **single** Voyage call — `embed_queries([original] + variants)` — rather than one request per string.
 
 ```
 QUERY_EXPANSION_ENABLED  = True
@@ -548,8 +710,11 @@ QUERY_EXPANSION_MODEL    = "gpt-4o-mini"
 ### 2. Single Multi-Vector Milvus Search
 All query vectors (original + variants) are sent in **one** `collection.search(data=[v1, v2, ..., vN])` call. Milvus returns a result set per vector; results are merged and deduplicated by `file_path::symbol_name`, keeping the highest score per chunk. This avoids N sequential round-trips over the gRPC connection, which would serialize due to PyMilvus's shared connection.
 
+When `--repo` is given, the search is scoped to that repo's Milvus partition (with a fallback to a `repo_name ==` expression clause for collections indexed before partitions existed). Summary chunks are excluded via `chunk_type != "summary"`.
+
 ```
-consistency_level = "Eventually"   # fastest for single-node Docker deployment
+search params      = {"metric_type": "COSINE", "params": {"ef": 64}}
+consistency_level  = "Eventually"   # fastest for single-node Docker deployment
 ```
 
 ### 3. Adaptive Top-K
@@ -565,6 +730,10 @@ Complexity triggers: ≥ 15 words, or keywords like `architecture`, `flow`, `pip
 ### 4. Re-ranking
 Before calling the cross-encoder, a score-gap pre-filter drops candidates whose cosine similarity is more than `0.35` below the best match — reducing reranker cost and latency without losing relevant results. The remaining candidates are re-scored by Voyage `rerank-2.5-lite`, which replaces cosine similarity with deeper relevance scores and reorders results significantly.
 
+If the pre-filter leaves fewer than `final_k` candidates, the fallback takes the top `final_k * 2` **by score** (`heapq.nlargest`). The merged candidate list is in Milvus return order across query vectors, not score order, so slicing it would silently drop the best candidates.
+
+When re-ranking is disabled, the top `final_k` chunks are selected by cosine score the same way.
+
 ```
 RERANKER_ENABLED = True
 RERANKER_MODEL   = "rerank-2.5-lite"
@@ -575,6 +744,13 @@ If all final chunks score below `MIN_RETRIEVAL_SCORE = 0.5`, the pipeline return
 
 ### 6. Graph-Augmented Expansion
 When `repo_name` is provided, the retriever expands direct results using a BFS over the call graph. Simple queries follow **1 hop** (direct callees, up to 3 graph chunks); complex queries follow **2 hops** (callees of callees, up to 5 graph chunks). The call graph tracks both bare-name calls (`foo()`) and attribute method calls (`obj.method()`).
+
+**Each BFS hop costs exactly two round trips**, regardless of frontier size:
+
+1. `get_callees_batch(repo, [(file, symbol), ...])` — one SQLite statement resolving every frontier chunk's callees at once, using a `(from_file, from_symbol) IN (VALUES ...)` clause with fully bound parameters.
+2. One Milvus `query()` with `symbol_name in ["a", "b", ...]`, fetching every callee chunk for the hop in a single call. Interpolated values are escaped so a symbol containing a quote cannot terminate the expression literal.
+
+The earlier implementation issued one SQLite query per chunk plus one Milvus query per callee. A depth-2 expansion went from 20+ sequential round trips to 4.
 
 Graph-expanded chunks are tagged `retrieval_source="graph"`. In `build_context()`, direct chunks are labelled `[C1]`, `[C2]`, … and graph chunks are labelled `[G1]`, `[G2]`, … so the LLM can distinguish semantic matches from structural dependencies.
 
@@ -602,6 +778,12 @@ Two separate embedding functions are used throughout the codebase:
 | `embed_queries(texts)` | Batch query embedding (expansion variants) | `"query"` |
 
 This asymmetry is intentional — using the wrong function for queries degrades retrieval quality significantly. `embed_queries()` sends all N variant queries in one API call instead of N sequential calls, eliminating per-request overhead.
+
+### Batching
+
+Texts are split into batches of `EMBEDDING_BATCH_SIZE` (128). When there is more than one batch, the batches are dispatched concurrently over a bounded `ThreadPoolExecutor` — `EMBED_MAX_WORKERS = 4` in `core/embedder.py`. The calls are network-bound, so a sequential loop leaves the process idle; the pool size is deliberately small so the account's rate limits still hold.
+
+Results are reassembled in **input order** (`pool.map` yields in submission order), so chunk-to-vector alignment is preserved regardless of completion order. Each batch is attempted up to 4 times, with exponential backoff (1s, 2s, 4s) between attempts.
 
 To switch embedding backends, change `EMBEDDING_PROVIDER` in `config.py`. Nothing else changes.
 
@@ -678,7 +860,7 @@ Search
     --show-chunks                     Print retrieved chunks alongside the answer
     --new-session                     Start a conversation session (prints ID)
     --session <id>                    Continue an existing session
-    --context-limit <n>               Max context tokens sent to gpt-4.1 (default: 8000, max: 32000)
+    --context-limit <n>               Max context tokens sent to gpt-4.1 (default: 8000, range: 1000-32000)
 
 Repos & Status
   python cli.py list                  Table of all indexed repos with chunk stats
@@ -700,15 +882,16 @@ The web UI is available via `app.py` (FastAPI) + `static/index.html`.
 ### Start the web server
 
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 7860 --reload
+python -m uvicorn app:app --host 127.0.0.1 --port 7860
 ```
 
-Open `http://localhost:7860` in your browser.
+Open `http://localhost:7860` in your browser. `./dev.sh start` runs the same
+server in the background (`nohup`, logging to `.webui.log`, PID in `.webui.pid`).
 
 ### Features
 
-- **Register / Login** — create an account and sign in with email + password
-- **Ask questions** — same pipeline as the CLI (expansion, reranking, gpt-4.1)
+- **Register / Login** — sign in with email + password (registration gated by `ALLOW_WEB_REGISTRATION`)
+- **Ask questions** — same pipeline as the CLI (expansion, reranking, graph expansion, gpt-4.1), streamed token-by-token over SSE
 - **Session continuity** — each browser tab maintains a session; answers reference prior questions
 - **New chat** — reset to a fresh session at any time
 - **Markdown rendering** — answers with headers, bullet lists, bold, code blocks, and inline code render correctly
@@ -720,11 +903,23 @@ Open `http://localhost:7860` in your browser.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `POST` | `/auth/login` | No | Email + password → Bearer token |
-| `POST` | `/auth/register` | No | Create account → Bearer token |
+| `POST` | `/auth/register` | No | Create account → Bearer token (gated, see below) |
+| `POST` | `/auth/logout` | Yes | Revoke the caller's Bearer token (idempotent) |
 | `GET` | `/auth/me` | Yes | Current user profile |
-| `POST` | `/query` | Yes | Ask a question, get answer + sources |
-| `GET` | `/repos` | Yes | List all indexed repositories |
+| `POST` | `/query` | Yes | Ask a question — streams the answer as SSE |
+| `GET` | `/repos` | Yes | List all indexed repositories (read from `.sync_state.json`) |
 | `GET` | `/` | No | Serves `static/index.html` |
+| `GET` | `/static/*` | No | Static assets |
+
+**Web registration is disabled by default.** `POST /auth/register` returns 403 unless `ALLOW_WEB_REGISTRATION=1` is set — except when no users exist yet, so the very first account can always be bootstrapped. Otherwise, register with `python cli.py register`. Passwords must be at least 8 characters.
+
+`POST /query` responds with `text/event-stream`. Each event is a JSON object on a `data:` line:
+
+```
+{"type": "token",  "text": "..."}                                  — one per streamed token
+{"type": "done",   "sources": [...], "tokens": N, "session_id": "..."}
+{"type": "error",  "message": "..."}
+```
 
 ---
 
@@ -758,12 +953,16 @@ Connect to: `host.docker.internal:19530` — no auth required
 
 ## Configuration
 
-All parameters live in `config.py`.
+All parameters live in `config.py`, except `EMBED_MAX_WORKERS` (in `core/embedder.py`).
+API keys and the two env-driven overrides come from `.env` — see [Run It Locally](#run-it-locally).
 
 | Parameter | Default | Description |
 |---|---|---|
+| `EMBEDDING_PROVIDER` | `voyage` | Embedding backend — `voyage` or `nomic_local` |
 | `EMBEDDING_MODEL` | `voyage-code-3` | Embedding model name |
 | `EMBEDDING_BATCH_SIZE` | `128` | Chunks per Voyage API call |
+| `EMBED_MAX_WORKERS` | `4` | Concurrent embed batches (`core/embedder.py`) |
+| `VECTOR_DIM` | `1024` | Embedding dimension — must match the Milvus schema |
 | `RERANKER_ENABLED` | `True` | Enable Voyage re-ranking |
 | `RERANKER_MODEL` | `rerank-2.5-lite` | Voyage re-ranker model |
 | `RETRIEVAL_CANDIDATE_K` | `10` | Milvus candidates before re-ranking |
@@ -771,6 +970,8 @@ All parameters live in `config.py`.
 | `COMPLEX_QUERY_CANDIDATE_K` | `20` | Candidates for complex queries |
 | `COMPLEX_QUERY_FINAL_K` | `8` | Final results for complex queries |
 | `MIN_RETRIEVAL_SCORE` | `0.5` | Minimum score threshold |
+| `TOP_K_RESULTS` | `5` | Default `top_k` when the caller doesn't pass one |
+| `COMPLEX_QUERY_MIN_WORDS` | `15` | Word count that marks a query complex |
 | `QUERY_EXPANSION_ENABLED` | `True` | Enable GPT-4o-mini query expansion |
 | `QUERY_EXPANSION_VARIANTS` | `2` | Number of alternative queries |
 | `LLM_MODEL` | `gpt-4.1` | OpenAI model |
@@ -781,7 +982,11 @@ All parameters live in `config.py`.
 | `SPLIT_OVERLAP_LINES` | `10` | Overlap lines between split parts |
 | `SESSION_MAX_TURNS` | `10` | Max prior turns in conversation context |
 | `AUTH_TOKEN_EXPIRY_DAYS` | `30` | Login token lifetime |
-| `REPOS_DIR` | `~/Desktop/Repos/` | Where your repos live |
+| `OPENAI_TIMEOUT_SECONDS` | `60.0` | Upstream timeout for OpenAI calls |
+| `VOYAGE_TIMEOUT_SECONDS` | `30.0` | Upstream timeout for Voyage embed + rerank |
+| `ALLOW_WEB_REGISTRATION` | `False` | Env-driven — set `ALLOW_WEB_REGISTRATION=1` to enable `POST /auth/register` |
+| `REPOS_DIR` | `~/Desktop/Repos/` | Where your repos live — override with the `CODE_INTEL_REPOS_DIR` env var |
+| `MILVUS_HOST` / `MILVUS_PORT` | `localhost` / `19530` | Milvus endpoint |
 | `COLLECTION_NAME` | `code_intel` | Milvus collection name |
 
 ---
