@@ -19,6 +19,8 @@ Covers:
   - repo.commit(sha) + old.diff(new) across every change_type branch in sync_repo
     (A / M / D / R, with a_path / b_path)
   - InvalidGitRepositoryError / GitCommandError / BadName raised where diff_tracker catches them
+  - the exception a *full* hexsha that is no longer in the repo actually raises
+    (force-push / rebase upstream), and sync_repo()'s full-reindex fallback for it
 """
 
 import os
@@ -234,3 +236,155 @@ def test_git_command_error_on_failed_pull(synced):
     synced.repo.remotes.origin.set_url(str(missing))
     with pytest.raises(git.GitCommandError):
         synced.repo.remotes.origin.pull()
+
+
+# ── Unreachable baseline SHA (upstream force-push / rebase) ───────────────────
+
+@pytest.fixture()
+def rewritten(tmp_path, hermetic_git_env):
+    """
+    Simulate the state code-intel lands in after an upstream force-push.
+
+    A clone is taken and its HEAD recorded as the sync baseline. Upstream then
+    rewrites that commit away and force-pushes, and the clone is refreshed from
+    the new history — so the recorded baseline SHA is a well-formed 40-char
+    hexsha that this repository simply does not contain any more.
+    """
+    upstream = tmp_path / "upstream.git"
+    work     = tmp_path / "work"
+    clone    = tmp_path / "clone"
+
+    _git(tmp_path, "init", "--bare", "--initial-branch=main", str(upstream))
+    _git(tmp_path, "init", "--initial-branch=main", str(work))
+    _git(work, "config", "user.email", "author@example.invalid")
+    _git(work, "config", "user.name", "Test Author")
+    _git(work, "config", "commit.gpgsign", "false")
+
+    (work / "base.py").write_text("base = True\n")
+    _commit_all(work, "base")
+    (work / "doomed.py").write_text("doomed = True\n")
+    _commit_all(work, "doomed")
+    _git(work, "remote", "add", "origin", str(upstream))
+    _git(work, "push", "-u", "origin", "main")
+
+    _git(tmp_path, "clone", str(upstream), str(clone))
+    baseline_sha = git.Repo(str(clone)).head.commit.hexsha
+
+    # Upstream rewrites history: drop the tip commit, land a different one.
+    _git(work, "reset", "--hard", "HEAD~1")
+    (work / "replacement.py").write_text("replacement = True\n")
+    _commit_all(work, "replacement")
+    _git(work, "push", "--force", "origin", "main")
+
+    # The indexed checkout follows the rewrite and drops the orphaned object,
+    # exactly as a re-clone or a `git gc` would.
+    _git(clone, "fetch", "origin")
+    _git(clone, "reset", "--hard", "origin/main")
+    _git(clone, "reflog", "expire", "--expire=now", "--all")
+    _git(clone, "gc", "--prune=now")
+
+    repo = git.Repo(str(clone))
+    return SimpleNamespace(
+        repo=repo,
+        clone=clone,
+        upstream=upstream,
+        baseline_sha=baseline_sha,
+        head_sha=repo.head.commit.hexsha,
+        tmp_path=tmp_path,
+    )
+
+
+def test_rewritten_baseline_sha_is_gone_but_well_formed(rewritten):
+    """The recorded baseline is still a valid-looking SHA — it just isn't there."""
+    assert len(rewritten.baseline_sha) == 40
+    assert rewritten.baseline_sha != rewritten.head_sha
+    probe = subprocess.run(
+        ("git", "cat-file", "-e", f"{rewritten.baseline_sha}^{{commit}}"),
+        cwd=str(rewritten.clone),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    assert probe.returncode != 0
+
+
+def test_missing_full_hexsha_does_not_raise_bad_name(rewritten):
+    """
+    The reason `except git.BadName` never fired.
+
+    BadName is for revisions git cannot *parse* into a name. A full hexsha parses
+    fine; it fails later, when the object database is asked for the object — and
+    that surfaces as a plain ValueError, which BadName does not cover.
+    """
+    with pytest.raises(Exception) as excinfo:
+        rewritten.repo.commit(rewritten.baseline_sha)
+    assert not isinstance(excinfo.value, git.BadName)
+    assert not isinstance(excinfo.value, git.BadObject)
+    assert isinstance(excinfo.value, ValueError)
+
+
+def test_bad_name_is_not_a_value_error_subclass():
+    """So a `except git.BadName` guard cannot incidentally catch the ValueError."""
+    assert not issubclass(git.BadName, ValueError)
+    assert not issubclass(git.BadObject, ValueError)
+
+
+def test_lazily_bound_commit_fails_only_when_read(rewritten):
+    """
+    A Commit can be bound to an absent object without complaint; the failure is
+    deferred until an attribute is read (ValueError) or .diff() shells out
+    (GitCommandError). _resolve_commit() must force that read itself.
+    """
+    lazy = git.Commit(rewritten.repo, bytes.fromhex("00" * 19 + "01"))
+    assert lazy.hexsha == "0" * 38 + "01"
+    with pytest.raises(ValueError):
+        assert lazy.tree
+
+
+# ── sync_repo()'s full-reindex fallback ───────────────────────────────────────
+
+@pytest.fixture()
+def dt_on(rewritten, monkeypatch):
+    """
+    Point diff_tracker at the rewritten clone with the stale baseline recorded,
+    and stub initial_index() so the fallback is observable without Milvus.
+    """
+    import core.diff_tracker as _dt
+
+    monkeypatch.setattr(_dt, "REPOS_DIR", rewritten.tmp_path)
+    monkeypatch.setattr(_dt, "SYNC_STATE_PATH", rewritten.tmp_path / "sync_state.json")
+    _dt._update_synced_commit("clone", rewritten.baseline_sha)
+
+    reindexed: list[str] = []
+    monkeypatch.setattr(_dt, "initial_index", lambda name: reindexed.append(name))
+    return SimpleNamespace(module=_dt, reindexed=reindexed)
+
+
+def test_sync_falls_back_to_full_reindex_when_baseline_is_gone(dt_on):
+    """The bug: this used to blow up instead of re-indexing."""
+    dt_on.module.sync_repo("clone")
+    assert dt_on.reindexed == ["clone"]
+
+
+def test_resolve_commit_returns_none_for_missing_sha(dt_on, rewritten):
+    assert dt_on.module._resolve_commit(rewritten.repo, rewritten.baseline_sha) is None
+
+
+def test_resolve_commit_returns_none_for_unparseable_revision(dt_on, rewritten):
+    """The original BadName case must keep working."""
+    assert dt_on.module._resolve_commit(rewritten.repo, "no_such_revision") is None
+
+
+def test_resolve_commit_returns_commit_for_live_sha(dt_on, rewritten):
+    resolved = dt_on.module._resolve_commit(rewritten.repo, rewritten.head_sha)
+    assert resolved is not None
+    assert resolved.hexsha == rewritten.head_sha
+
+
+def test_resolve_commit_does_not_swallow_unrelated_errors(dt_on, rewritten):
+    """The guard is narrow on purpose — it must not become a bare `except`."""
+    class Exploding:
+        def commit(self, _rev):
+            raise MemoryError("not a resolution failure")
+
+    with pytest.raises(MemoryError):
+        dt_on.module._resolve_commit(Exploding(), rewritten.head_sha)

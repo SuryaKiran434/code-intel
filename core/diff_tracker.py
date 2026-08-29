@@ -94,6 +94,42 @@ def _is_supported(file_path: str) -> bool:
     return Path(file_path).suffix in LANGUAGE_REGISTRY
 
 
+# ── Commit resolution ──────────────────────────────────────────────────────────
+
+# Every way GitPython signals "this revision does not name an object in this
+# repository", and nothing else:
+#   BadName        — the revision can't be parsed into a name at all ("HEAD~99")
+#   BadObject      — parsed to a binsha the object database doesn't have
+#   ValueError     — a full 40-char hexsha that git reports as `missing`; note
+#                    BadName/BadObject descend from ODBError, *not* ValueError,
+#                    so this is a genuinely separate case and not covered by them
+#   GitCommandError — the same lookup when it happens via a git subprocess
+# Anything outside this tuple is a real fault and must keep propagating.
+_UNRESOLVABLE_REVISION = (git.BadName, git.BadObject, git.GitCommandError, ValueError)
+
+
+def _resolve_commit(repo: git.Repo, rev: str) -> git.Commit | None:
+    """
+    Resolve `rev` to a commit that is actually present in `repo`.
+
+    Returns None when the revision does not name an object this repository
+    holds — which is exactly what a stored sync baseline becomes after upstream
+    rewrites history (force-push, rebase, squash) and the old commit is pruned.
+    Callers treat None as "baseline is unusable, fall back to a full reindex".
+
+    Resolution is forced here on purpose. GitPython can hand back a Commit bound
+    to an absent object without complaint and only fail when the object is first
+    read, which would otherwise push the error out of this function and into the
+    caller's `.diff()` call as an unrelated-looking exception.
+    """
+    try:
+        commit = repo.commit(rev)
+        commit.tree  # noqa: B018 — forces the object read; see docstring
+    except _UNRESOLVABLE_REVISION:
+        return None
+    return commit
+
+
 # ── Initial full index ─────────────────────────────────────────────────────────
 
 def initial_index(repo_name: str):
@@ -221,17 +257,17 @@ def sync_repo(repo_name: str):
     )
 
     # ── Step 3: Find changed files ─────────────────────────────────────────────
-    try:
-        old_commit = repo.commit(last_commit_sha)
-        new_commit = repo.commit(new_commit_sha)
-        diff       = old_commit.diff(new_commit)
-    except git.BadName:
+    old_commit = _resolve_commit(repo, last_commit_sha)
+    if old_commit is None:
         console.print(
-            f"  [yellow]Could not resolve previous commit {last_commit_sha[:8]}. "
+            f"  [yellow]Could not resolve previous commit {last_commit_sha[:8]} — "
+            f"it is no longer in the repository (history rewritten upstream?). "
             f"Running full reindex...[/yellow]"
         )
         initial_index(repo_name)
         return
+
+    diff = old_commit.diff(repo.head.commit)
 
     # Collect all affected file paths (both sides of renames/moves)
     changed_files: set[str] = set()
