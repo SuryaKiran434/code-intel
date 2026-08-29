@@ -16,6 +16,7 @@ process restarts between syncs.
 """
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import git
@@ -126,11 +127,12 @@ def initial_index(repo_name: str):
         console.print(f"  [dim]Supported extensions: {list(LANGUAGE_REGISTRY.keys())}[/dim]")
         return
 
-    full_count       = sum(1 for c in chunks if c.chunk_type == "full")
-    split_count      = sum(1 for c in chunks if c.chunk_type == "split_part")
-    summary_count    = sum(1 for c in chunks if c.chunk_type == "summary")
-    docstring_count  = sum(1 for c in chunks if c.chunk_type == "docstring")
-    module_count     = sum(1 for c in chunks if c.chunk_type == "module_level")
+    type_counts      = Counter(c.chunk_type for c in chunks)
+    full_count       = type_counts["full"]
+    split_count      = type_counts["split_part"]
+    summary_count    = type_counts["summary"]
+    docstring_count  = type_counts["docstring"]
+    module_count     = type_counts["module_level"]
 
     console.print(
         f"  Found [bold]{len(chunks)}[/bold] total chunks "

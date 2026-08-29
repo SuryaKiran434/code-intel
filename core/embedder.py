@@ -16,6 +16,7 @@ Nothing else changes.
 import hashlib
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 
 from config import (
     EMBEDDING_PROVIDER,
@@ -37,6 +38,11 @@ def content_hash(content: str) -> str:
 def _batch(items: list, size: int) -> list[list]:
     """Split a list into batches of a given size."""
     return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+# Concurrent in-flight embed requests. Small on purpose: enough to overlap
+# network latency, low enough to stay inside the account's rate limits.
+EMBED_MAX_WORKERS = 4
 
 
 # ── Abstract base ─────────────────────────────────────────────────────────────
@@ -92,6 +98,31 @@ class VoyageEmbedder(BaseEmbedder):
             timeout=VOYAGE_TIMEOUT_SECONDS,
         )
 
+    def _embed_batch(
+        self,
+        batch: list[str],
+        input_type: str,
+    ) -> list[list[float]]:
+        """Embed one batch with exponential backoff retry."""
+        for attempt in range(4):   # up to 4 retries
+            try:
+                result = self._client.embed(
+                    texts=batch,
+                    model=EMBEDDING_MODEL,
+                    input_type=input_type,
+                    output_dimension=VECTOR_DIM,
+                )
+                return result.embeddings
+
+            except Exception as e:
+                if attempt == 3:
+                    raise RuntimeError(
+                        f"Voyage API failed after 4 attempts: {e}"
+                    ) from e
+                wait = 2 ** attempt   # 1s, 2s, 4s, 8s backoff
+                print(f"  [retry {attempt+1}/4] Waiting {wait}s... ({e})")
+                time.sleep(wait)
+
     def _call_api(
         self,
         texts: list[str],
@@ -100,31 +131,26 @@ class VoyageEmbedder(BaseEmbedder):
         """
         Call Voyage API with exponential backoff retry.
         input_type: "document" for code chunks, "query" for user queries.
+
+        Batches are sent concurrently through a small bounded pool — the calls
+        are network-bound, and a sequential loop leaves the process idle. The
+        pool size caps in-flight requests so the account's rate limits still
+        hold. Results are reassembled in input order, so chunk-to-vector
+        alignment is preserved regardless of completion order.
         """
-        all_embeddings = []
+        batches = _batch(texts, EMBEDDING_BATCH_SIZE)
+        if len(batches) <= 1:
+            return self._embed_batch(batches[0], input_type) if batches else []
 
-        for batch in _batch(texts, EMBEDDING_BATCH_SIZE):
-            for attempt in range(4):   # up to 4 retries
-                try:
-                    result = self._client.embed(
-                        texts=batch,
-                        model=EMBEDDING_MODEL,
-                        input_type=input_type,
-                        output_dimension=VECTOR_DIM,
-                    )
-                    all_embeddings.extend(result.embeddings)
-                    break
+        with ThreadPoolExecutor(
+            max_workers=min(EMBED_MAX_WORKERS, len(batches))
+        ) as pool:
+            # executor.map yields results in submission order, not completion order
+            per_batch = list(pool.map(
+                lambda b: self._embed_batch(b, input_type), batches
+            ))
 
-                except Exception as e:
-                    if attempt == 3:
-                        raise RuntimeError(
-                            f"Voyage API failed after 4 attempts: {e}"
-                        ) from e
-                    wait = 2 ** attempt   # 1s, 2s, 4s, 8s backoff
-                    print(f"  [retry {attempt+1}/4] Waiting {wait}s... ({e})")
-                    time.sleep(wait)
-
-        return all_embeddings
+        return [vec for batch_vecs in per_batch for vec in batch_vecs]
 
     def embed_code(self, texts: list[str]) -> list[list[float]]:
         """Embed code chunks for storage — uses input_type='document'."""

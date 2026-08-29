@@ -8,7 +8,7 @@ Covers:
   - import_from_statement extraction (single, multiple, relative)
   - call edge extraction (bare function calls only)
   - filtering: method calls, self-calls, builtins
-  - SQLite round-trip for get_callees / get_callers / get_imports
+  - SQLite round-trip for get_callees / get_callees_batch / get_callers / get_imports
   - Non-Python files silently skipped
 """
 
@@ -22,6 +22,7 @@ from core.graph import (
     _extract_calls,
     extract_and_store_graph,
     get_callees,
+    get_callees_batch,
     get_callers,
     get_imports,
 )
@@ -239,6 +240,79 @@ def test_get_callees_empty_for_leaf(tmp_db, tmp_path):
 
     callees = get_callees("myrepo", str(f), "leaf")
     assert callees == []
+
+
+def test_get_callees_batch_matches_per_pair_lookup(tmp_db, tmp_path):
+    """The batched lookup must return exactly what N get_callees() calls return."""
+    source_a = textwrap.dedent("""\
+        def alpha():
+            beta()
+            gamma()
+
+        def beta():
+            zeta()
+    """)
+    source_b = textwrap.dedent("""\
+        def delta():
+            gamma()
+
+        def leaf():
+            pass
+    """)
+    fa, fb = tmp_path / "a.py", tmp_path / "b.py"
+    fa.write_text(source_a)
+    fb.write_text(source_b)
+    for f, src in ((fa, source_a), (fb, source_b)):
+        tree, lines = _parse(src)
+        extract_and_store_graph(str(f), "myrepo", tree, lines, "python")
+
+    pairs = [
+        (str(fa), "alpha"),
+        (str(fa), "beta"),
+        (str(fb), "delta"),
+        (str(fb), "leaf"),        # no callees → absent from the batch result
+        (str(fb), "missing"),     # unknown symbol → absent from the batch result
+    ]
+
+    batched = get_callees_batch("myrepo", pairs)
+    expected = {
+        pair: get_callees("myrepo", *pair)
+        for pair in pairs
+        if get_callees("myrepo", *pair)
+    }
+
+    assert {k: sorted(v) for k, v in batched.items()} == {
+        k: sorted(v) for k, v in expected.items()
+    }
+    assert (str(fb), "leaf") not in batched
+
+
+def test_get_callees_batch_scopes_by_repo(tmp_db, tmp_path):
+    source = textwrap.dedent("""\
+        def alpha():
+            beta()
+    """)
+    f = tmp_path / "scoped.py"
+    f.write_text(source)
+    tree, lines = _parse(source)
+    extract_and_store_graph(str(f), "myrepo", tree, lines, "python")
+
+    assert get_callees_batch("otherrepo", [(str(f), "alpha")]) == {}
+    assert get_callees_batch("myrepo", []) == {}
+
+
+def test_get_callees_batch_handles_duplicate_pairs(tmp_db, tmp_path):
+    source = textwrap.dedent("""\
+        def alpha():
+            beta()
+    """)
+    f = tmp_path / "dup.py"
+    f.write_text(source)
+    tree, lines = _parse(source)
+    extract_and_store_graph(str(f), "myrepo", tree, lines, "python")
+
+    pair = (str(f), "alpha")
+    assert get_callees_batch("myrepo", [pair, pair, pair]) == {pair: ["beta"]}
 
 
 def test_get_callers(tmp_db, tmp_path):
