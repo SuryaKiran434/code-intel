@@ -6,7 +6,7 @@ openai==2.26.0              # OpenAI API (gpt-4.1 answers, gpt-4o-mini query exp
 tiktoken==0.12.0            # Token counting for context window management
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
-voyageai==0.3.7             # Voyage AI API client (voyage-code-3)
+voyageai==0.5.0             # Voyage AI API client (voyage-code-3)
 # sentence-transformers     # Uncomment when switching to nomic_local
 # torch                     # Uncomment when switching to nomic_local
 
