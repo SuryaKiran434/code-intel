@@ -13,6 +13,7 @@ Key design decisions:
     have full source context (file, symbol, line numbers, score)
 """
 
+import heapq
 import logging
 import time as _time
 
@@ -181,11 +182,16 @@ def retrieve(
         # latency without sacrificing recall on the candidates that matter.
         max_score  = max(c["score"] for c in chunks)
         pre_filtered = [c for c in chunks if max_score - c["score"] <= 0.35]
-        # Always keep enough candidates for reranking to be meaningful
-        to_rerank = pre_filtered if len(pre_filtered) >= final_k else chunks[:final_k * 2]
+        # Always keep enough candidates for reranking to be meaningful.
+        # `chunks` is in Milvus return order across query vectors, not score
+        # order — slicing it would silently drop the best candidates.
+        to_rerank = (
+            pre_filtered if len(pre_filtered) >= final_k
+            else heapq.nlargest(final_k * 2, chunks, key=lambda c: c["score"])
+        )
         chunks = _rerank(query, to_rerank, top_k=final_k)
     else:
-        chunks = sorted(chunks, key=lambda c: c["score"], reverse=True)[:final_k]
+        chunks = heapq.nlargest(final_k, chunks, key=lambda c: c["score"])
     _log.info("rerank:    %.0fms  (%d→%d chunks)", (_time.monotonic() - t3) * 1000, len(seen_ids), len(chunks))
 
     # ── Confidence threshold ───────────────────────────────────────────────────
@@ -232,30 +238,41 @@ def retrieve_for_file(
 def retrieve_by_symbol(
     symbol_name: str,
     repo_name: str = None,
+    limit: int = None,
 ) -> list[dict]:
     """
     Exact symbol name lookup — finds a specific function or class by name.
     Useful for: 'Show me the authenticate() function'.
+
+    `limit` caps how many chunks Milvus returns; callers that only need the
+    first match should pass it rather than transferring every matching chunk.
     """
     collection = _get_collection()
 
-    expr = f'symbol_name == "{symbol_name}"'
+    expr = f'symbol_name == "{_escape_expr_str(symbol_name)}" && chunk_type != "summary"'
     if repo_name:
-        expr += f' && repo_name == "{repo_name}"'
+        expr += f' && repo_name == "{_escape_expr_str(repo_name)}"'
 
+    kwargs = {"limit": limit} if limit is not None else {}
     results = collection.query(
         expr=expr,
         output_fields=_OUTPUT_FIELDS,
+        **kwargs,
     )
 
-    return [
-        {**r, "score": 1.0}
-        for r in results
-        if r.get("chunk_type") != "summary"
-    ]
+    return [{**r, "score": 1.0} for r in results]
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
+
+def _escape_expr_str(value: str) -> str:
+    """
+    Escape a value for safe interpolation into a Milvus boolean expression
+    string literal. Without this, a symbol or repo name containing a quote
+    can terminate the literal early and inject expression syntax.
+    """
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
 
 def _is_complex_query(query: str) -> bool:
     """
@@ -337,6 +354,33 @@ def _format_result_set(result_set) -> list[dict]:
     ]
 
 
+def _fetch_chunks_by_symbols(
+    collection,
+    symbol_names,
+    repo_name: str,
+) -> dict[str, list[dict]]:
+    """
+    Fetch every non-summary chunk for a set of symbol names in ONE Milvus
+    query, grouped by symbol name. Used by graph expansion so a BFS hop costs
+    a single round trip rather than one per callee.
+    """
+    if not symbol_names:
+        return {}
+
+    quoted = ", ".join(f'"{_escape_expr_str(s)}"' for s in symbol_names)
+    expr = (
+        f'symbol_name in [{quoted}]'
+        f' && repo_name == "{_escape_expr_str(repo_name)}"'
+        f' && chunk_type != "summary"'
+    )
+    results = collection.query(expr=expr, output_fields=_OUTPUT_FIELDS)
+
+    by_symbol: dict[str, list[dict]] = {}
+    for r in results:
+        by_symbol.setdefault(r.get("symbol_name"), []).append({**r, "score": 1.0})
+    return by_symbol
+
+
 def _expand_with_graph(
     chunks: list[dict],
     repo_name: str,
@@ -354,7 +398,7 @@ def _expand_with_graph(
 
     At most `max_graph_chunks` graph chunks are added in total.
     """
-    from core.graph import get_callees  # noqa: PLC0415
+    from core.graph import get_callees_batch  # noqa: PLC0415
 
     # Track all chunk identities seen so far (direct + graph)
     seen_ids: set[str] = {
@@ -371,17 +415,31 @@ def _expand_with_graph(
 
         next_frontier: list[dict] = []
 
+        # One SQLite statement for the whole hop, then one Milvus query for
+        # every callee symbol it produced — instead of a round trip per chunk
+        # and another per callee.
+        callee_map = get_callees_batch(
+            repo_name,
+            [(c["file_path"], c["symbol_name"]) for c in frontier],
+        )
+        hop_symbols = {
+            callee
+            for chunk in frontier
+            for callee in callee_map.get((chunk["file_path"], chunk["symbol_name"]), ())
+        }
+        chunks_by_symbol = _fetch_chunks_by_symbols(collection, hop_symbols, repo_name)
+
         for chunk in frontier:
             if len(graph_chunks) >= max_graph_chunks:
                 break
 
-            callees = get_callees(repo_name, chunk["file_path"], chunk["symbol_name"])
+            callees = callee_map.get((chunk["file_path"], chunk["symbol_name"]), [])
 
             for callee in callees:
                 if len(graph_chunks) >= max_graph_chunks:
                     break
 
-                dep_chunks = retrieve_by_symbol(callee, repo_name)
+                dep_chunks = chunks_by_symbol.get(callee, [])
                 for dep in dep_chunks:
                     cid = f"{dep['file_path']}::{dep['symbol_name']}"
                     if cid not in seen_ids:

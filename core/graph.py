@@ -270,6 +270,45 @@ def get_callees(repo_name: str, file_path: str, symbol_name: str) -> list[str]:
         return []
 
 
+def get_callees_batch(
+    repo_name: str,
+    pairs: list[tuple[str, str]],
+) -> dict[tuple[str, str], list[str]]:
+    """
+    Batched form of get_callees(): resolve many (file_path, symbol_name) pairs
+    in a single SQL statement instead of one query per pair.
+
+    Returns a dict keyed by (file_path, symbol_name); pairs with no call edges
+    are simply absent. Per-pair callee order matches get_callees().
+    """
+    if not pairs:
+        return {}
+
+    # Deduplicate while preserving caller order, then bind every value as a
+    # parameter — the placeholder list is built from the pair count only.
+    unique = list(dict.fromkeys(pairs))
+    placeholders = ", ".join("(?, ?)" for _ in unique)
+    params = [repo_name]
+    for file_path, symbol_name in unique:
+        params.extend((file_path, symbol_name))
+
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30) as conn:
+            rows = conn.execute(
+                f"""SELECT from_file, from_symbol, to_symbol FROM call_edges
+                    WHERE repo_name = ?
+                      AND (from_file, from_symbol) IN (VALUES {placeholders})""",
+                params,
+            ).fetchall()
+    except Exception:   # noqa: BLE001
+        return {}
+
+    result: dict[tuple[str, str], list[str]] = {}
+    for from_file, from_symbol, to_symbol in rows:
+        result.setdefault((from_file, from_symbol), []).append(to_symbol)
+    return result
+
+
 def get_callers(repo_name: str, symbol_name: str) -> list[dict]:
     """
     Return (file_path, symbol_name) pairs that call `symbol_name` in this repo.
