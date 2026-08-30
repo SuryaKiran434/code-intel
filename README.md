@@ -289,7 +289,7 @@ Update .sync_state.json with new HEAD commit
 │   ├── CODEOWNERS
 │   ├── dependabot.yml          # Weekly pip + github-actions updates
 │   └── workflows/
-│       ├── test.yml            # CI: pytest (3.13) + ruff lint
+│       ├── test.yml            # CI: pytest (3.13) + coverage + ruff lint + SonarCloud
 │       └── slack-notify.yml
 │
 ├── core/
@@ -489,17 +489,33 @@ source .venv/bin/activate
 OPENAI_API_KEY=test-openai-key VOYAGE_API_KEY=test-voyage-key pytest -v
 ```
 
-**112 tests, all passing.**
+**150 tests, all passing.**
 
 | File | Tests | Covers |
 |---|---|---|
 | `tests/test_graph.py` | 24 | Import/call extraction, `get_callees_batch`, SQLite round-trips |
+| `tests/test_diff_tracker_git.py` | 23 | Git-backed sync: baseline resolution, unreachable SHAs, rename detection |
 | `tests/test_chunker.py` | 20 | All 5 chunk types, 3-tier strategy, split overlap |
 | `tests/test_diff_tracker.py` | 16 | Sync state persistence, file-type filtering |
 | `tests/test_vector_store.py` | 16 | `partition_name`, `ensure_partition`, reinsert |
 | `tests/test_retriever.py` | 15 | Filters, adaptive top-K, rerank fallback, graph expansion |
 | `tests/test_query_expander.py` | 14 | L1/L2 cache hit/miss, API failure handling |
+| `tests/test_app_query_errors.py` | 8 | `/query` streaming failures return the generic message, never upstream text |
 | `tests/test_embedder.py` | 7 | Batching, worker pool, order preservation |
+| `tests/test_app_repos_errors.py` | 7 | `GET /repos` failures do not leak the sync-state file path |
+
+#### Coverage
+
+```bash
+pytest --cov=core --cov=app --cov=cli --cov-report=term
+```
+
+The `--cov` list must name every path in `sonar.sources`, not just `core`. SonarCloud
+scores a declared source file that is **absent** from `coverage.xml` as 0% covered
+rather than as unmeasured, so measuring only `core` reported `app.py` as 0/110 while
+the two `test_app_*` suites above were already exercising its error handlers — and the
+quality gate failed on a number the tests had in fact already earned. `app.py` reports
+81%; `cli.py` has no tests yet and so is still absent from the report.
 
 Lint with the same rule set CI uses:
 
@@ -507,7 +523,9 @@ Lint with the same rule set CI uses:
 pip install ruff && ruff check .
 ```
 
-CI (`.github/workflows/test.yml`) runs both as required checks: **`pytest (3.13)`** and **`lint`**.
+CI (`.github/workflows/test.yml`) runs two required checks — **`pytest (3.13)`** and
+**`lint`** — plus a SonarCloud scan that consumes `coverage.xml`. The scan is advisory:
+it runs `continue-on-error`, so a SonarCloud outage never blocks a merge.
 
 ### Stopping and cleaning up
 
