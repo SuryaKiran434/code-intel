@@ -27,8 +27,18 @@ def _clear_l1(qe, *queries):
 # ── Hash determinism ───────────────────────────────────────────────────────────
 
 def test_query_hash_is_deterministic():
+    """Two calls with the same input must agree.
+
+    Written as two named calls rather than one expression compared with itself:
+    the assertion is about repeated invocation, but `f(x) == f(x)` is
+    indistinguishable from a copy-paste typo to anything reading it, human or
+    scanner, and a rule that flags real self-comparisons is worth keeping loud.
+    """
     from core.query_expander import _query_hash
-    assert _query_hash("hello world") == _query_hash("hello world")
+
+    first = _query_hash("hello world")
+    second = _query_hash("hello world")
+    assert first == second
 
 
 def test_query_hash_length():
