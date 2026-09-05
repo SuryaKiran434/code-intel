@@ -2,8 +2,8 @@
 # Bump intentionally — not silently via `pip install -U`.
 
 # ── LLM ──────────────────────────────────────────────────────────────────────
-openai==2.26.0              # OpenAI API (gpt-4.1 answers, gpt-4o-mini query expansion)
-tiktoken==0.12.0            # Token counting for context window management
+openai==2.54.0              # OpenAI API (gpt-4.1 answers, gpt-4o-mini query expansion)
+tiktoken==0.14.0            # Token counting for context window management
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
 voyageai==0.5.0             # Voyage AI API client (voyage-code-3)
@@ -11,29 +11,29 @@ voyageai==0.5.0             # Voyage AI API client (voyage-code-3)
 # torch                     # Uncomment when switching to nomic_local
 
 # ── Vector Database ───────────────────────────────────────────────────────────
-pymilvus==2.6.9             # Milvus Python client
+pymilvus==2.6.17             # Milvus Python client
 
 # ── Code Chunking ─────────────────────────────────────────────────────────────
-tree-sitter==0.23.2         # Pinned — API changed in 0.22+
-tree-sitter-python==0.23.6  # Python grammar for tree-sitter
+tree-sitter==0.26.0         # Pinned — API changed in 0.22+
+tree-sitter-python==0.25.0  # Python grammar for tree-sitter
 # tree-sitter-java          # Uncomment when adding Java support
 # tree-sitter-scala         # Uncomment when adding Scala support
 
 # ── Git Integration ───────────────────────────────────────────────────────────
-gitpython==3.1.58           # git diff, pull, commit tracking
+gitpython==3.1.61           # git diff, pull, commit tracking
 
 # ── Web Server ────────────────────────────────────────────────────────────────
 fastapi==0.141.1            # REST API for web UI
-uvicorn==0.41.0             # ASGI server for FastAPI
-pydantic==2.13.4            # Request/response models (FastAPI dependency)
+uvicorn==0.52.4             # ASGI server for FastAPI
+pydantic==2.13.5            # Request/response models (FastAPI dependency)
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
-click==8.3.1                # CLI framework
-rich==14.3.3                # Terminal output + progress bars
+click==8.5.0                # CLI framework
+rich==14.3.4                # Terminal output + progress bars
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.2.3        # .env file loading
-numpy==2.4.3                # Transitive dependency (required by voyageai and pymilvus)
+numpy==2.5.2                # Transitive dependency (required by voyageai and pymilvus)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==9.1.1               # Test runner
