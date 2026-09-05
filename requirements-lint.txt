@@ -1,0 +1,20 @@
+# Lint-only dependencies for the `lint` job in .github/workflows/test.yml.
+#
+# WHY THIS FILE EXISTS
+# This pin used to live on an ad-hoc `pip install ruff==0.16.5` command line
+# inside the workflow. Dependabot parses manifests, not shell, so it could not
+# see that pin and could never bump it -- the linter would sit frozen while
+# every other dependency moved. In a manifest, it is tracked like the rest.
+#
+# WHY NOT JUST PUT IT IN requirements.txt
+# The lint job deliberately does NOT install requirements.txt: `ruff check .`
+# is a static, source-only pass that needs no runtime package. Folding ruff into
+# requirements.txt (or into requirements-ci.txt) would force that job to pull
+# the whole runtime tree -- openai, pymilvus, tree-sitter, fastapi, numpy -- to
+# run a linter that reads files off disk. A separate file keeps the lint job as
+# cheap as it is today while still being a manifest Dependabot can track.
+#
+# Versions here are the ones CI already resolved -- this locks the current set,
+# it does not move it.
+
+ruff==0.16.5                # Linter (config lives in pyproject.toml)
