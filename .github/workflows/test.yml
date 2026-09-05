@@ -44,9 +44,10 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt --only-binary :all:
-          # Test-only; requirements.txt stays the pinned runtime set. Pinned to
-          # the version CI already resolved, so behaviour is unchanged.
-          pip install pytest-cov==7.1.0 --only-binary :all:
+          # Test-only extras; requirements.txt stays the pinned runtime set.
+          # The pins live in the manifest rather than on this command line so
+          # Dependabot can see and bump them -- it parses manifests, not shell.
+          pip install -r requirements-ci.txt --only-binary :all:
 
       - name: Run pytest
         env:
@@ -102,11 +103,14 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      # Pinned to the version CI already resolved; see the install step above
-      # for why `--only-binary :all:` is here.
+      # The ruff pin lives in requirements-lint.txt so Dependabot can track it.
+      # That is a separate manifest from requirements-ci.txt on purpose: this job
+      # deliberately does not install requirements.txt, because `ruff check .` is
+      # a source-only pass that needs no runtime package. See the install step
+      # above for why `--only-binary :all:` is here.
       - name: Install ruff
         # Quoted: a plain YAML scalar may not end in a colon.
-        run: "pip install ruff==0.16.5 --only-binary :all:"
+        run: "pip install -r requirements-lint.txt --only-binary :all:"
 
       - name: Run ruff
         run: ruff check .

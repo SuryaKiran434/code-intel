@@ -1,0 +1,22 @@
+# Test-only dependencies for the `pytest` job in .github/workflows/test.yml.
+#
+# WHY THIS FILE EXISTS
+# These pins used to live on an ad-hoc `pip install pytest-cov==7.1.0` command
+# line inside the workflow. Dependabot parses manifests, not shell, so a pin
+# written that way is invisible to it: requirements.txt would keep moving while
+# the CI-only pin silently rotted, and the version CI tested could drift away
+# from the version anyone else installs. Anything CI installs at a fixed version
+# belongs in a manifest so Dependabot can see and bump it.
+#
+# WHY NOT JUST PUT IT IN requirements.txt
+# requirements.txt is the pinned *runtime* set -- what you need to actually run
+# the indexer, the API and the CLI. pytest-cov is needed only to measure
+# coverage in CI, so shipping it to every runtime install would be dead weight.
+# (pytest itself is the exception and stays in requirements.txt, where it
+# already is; this file only adds what CI needs on top.)
+#
+# The pytest job installs BOTH: `-r requirements.txt` then `-r requirements-ci.txt`.
+# Versions here are the ones CI already resolved -- this locks the current set,
+# it does not move it.
+
+pytest-cov==7.1.0           # Coverage plugin for pytest (produces coverage.xml)
