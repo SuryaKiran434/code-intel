@@ -280,16 +280,17 @@ Update .sync_state.json with new HEAD commit
 ├── estimate_tokens.py          # Dry-run token estimator (zero API cost)
 ├── pytest.ini                  # Test runner configuration
 ├── pyproject.toml              # Ruff lint configuration
+├── sonar-project.properties    # SonarCloud sources, tests, coverage report path
 ├── LIMITATIONS.md              # Known gaps and trade-offs
 │
 ├── static/
 │   └── index.html              # Web UI single-page frontend
 │
 ├── .github/
-│   ├── CODEOWNERS
-│   ├── dependabot.yml          # Weekly pip + github-actions updates
+│   ├── dependabot.yml          # Weekly grouped pip + github-actions updates
 │   └── workflows/
 │       ├── test.yml            # CI: pytest (3.13) + coverage + ruff lint + SonarCloud
+│       ├── dependabot-auto-merge.yml  # Queues grouped minor/patch bumps to merge
 │       └── slack-notify.yml
 │
 ├── core/
@@ -312,9 +313,12 @@ Update .sync_state.json with new HEAD commit
     ├── test_graph.py       # Import/call graph extraction, SQLite round-trips
     ├── test_query_expander.py  # L1/L2 cache hit/miss, API failure handling
     ├── test_diff_tracker.py    # Sync state persistence, file-type filtering
+    ├── test_diff_tracker_git.py # Git-backed sync: baselines, unreachable SHAs, renames
     ├── test_vector_store.py    # partition_name, ensure_partition, reinsert
     ├── test_retriever.py       # Filters, adaptive top-K, rerank, graph expansion
-    └── test_embedder.py        # Batching, worker pool, order preservation
+    ├── test_embedder.py        # Batching, worker pool, order preservation
+    ├── test_app_query_errors.py # /query streaming failures never leak upstream text
+    └── test_app_repos_errors.py # GET /repos failures never leak the sync-state path
 ```
 
 **Local data directory:** `~/.code-intel/`
@@ -336,7 +340,7 @@ Update .sync_state.json with new HEAD commit
 | **LLM** | `gpt-4.1` (OpenAI) | 1M token context, strong code reasoning |
 | **Query expansion** | `gpt-4o-mini` (OpenAI) | Low-cost variant generation |
 | **Vector DB** | Milvus standalone (Docker) | Local, fast, production-grade, free |
-| **AST parser** | tree-sitter 0.23.x | Language-aware chunking, not naive splits |
+| **AST parser** | tree-sitter 0.26.x | Language-aware chunking, not naive splits |
 | **Index type** | HNSW + COSINE | Approximate nearest-neighbour, auto-migrated from IVF_FLAT on first run |
 | **Auth** | PBKDF2-HMAC-SHA256 + SQLite | stdlib only, OWASP 2023 iterations |
 | **Local DB** | SQLite | Sessions, tokens, query log, zero deps |
