@@ -20,7 +20,7 @@ tree-sitter-python==0.25.0  # Python grammar for tree-sitter
 # tree-sitter-scala         # Uncomment when adding Scala support
 
 # ── Git Integration ───────────────────────────────────────────────────────────
-gitpython==3.1.61           # git diff, pull, commit tracking
+gitpython==3.1.62           # git diff, pull, commit tracking
 
 # ── Web Server ────────────────────────────────────────────────────────────────
 fastapi==0.141.1            # REST API for web UI
@@ -33,7 +33,7 @@ rich==14.3.4                # Terminal output + progress bars
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.2.3        # .env file loading
-numpy==2.5.2                # Transitive dependency (required by voyageai and pymilvus)
+numpy==2.5.3                # Transitive dependency (required by voyageai and pymilvus)
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==9.1.1               # Test runner
