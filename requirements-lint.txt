@@ -1,7 +1,7 @@
 # Lint-only dependencies for the `lint` job in .github/workflows/test.yml.
 #
 # WHY THIS FILE EXISTS
-# This pin used to live on an ad-hoc `pip install ruff==0.16.8` command line
+# This pin used to live on an ad-hoc `pip install ruff==0.16.9` command line
 # inside the workflow. Dependabot parses manifests, not shell, so it could not
 # see that pin and could never bump it -- the linter would sit frozen while
 # every other dependency moved. In a manifest, it is tracked like the rest.
@@ -17,4 +17,4 @@
 # Versions here are the ones CI already resolved -- this locks the current set,
 # it does not move it.
 
-ruff==0.16.8                # Linter (config lives in pyproject.toml)
+ruff==0.16.9                # Linter (config lives in pyproject.toml)
